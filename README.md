@@ -1,4 +1,3 @@
-```markdown
 # PitchShifter
 
 PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting of audio and video files.
@@ -59,7 +58,6 @@ Install these with `pip`:
    ```bash
    git clone https://github.com/<your-username>/pitchshifter.git
    cd pitchshifter
-````
 
 2. **Create and activate a virtual environment (recommended)**
 
@@ -109,8 +107,6 @@ From the project folder, run:
 ```bash
 python pitchshifter.py
 ```
-
-(or whatever the main script file is named in your repo).
 
 The PitchShifter window should appear.
 
