@@ -44,8 +44,10 @@ PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting o
 
 Download the pre-built installer for your operating system from the [Releases](https://github.com/papura-octavian/Pitch_changher/releases) page:
 
-- **Windows**: Download `PitchShifter-Setup-*.exe` and run it. The installer will guide you through the setup.
-- **Linux**: Download `PitchShifter-*-x86_64.AppImage`, make it executable (`chmod +x PitchShifter-*.AppImage`), and run it.
+- **Windows**: Download `PitchShifter-Setup-*.exe` from the latest release and run it. The installer will guide you through the setup.
+- **Linux**: Download `PitchShifter-*-x86_64.AppImage` from the latest release, make it executable (`chmod +x PitchShifter-*.AppImage`), and run it.
+
+**Latest Release**: [v1.0.9](https://github.com/papura-octavian/Pitch_changher/releases/latest)
 
 **Note**: FFmpeg is bundled with the installers, so you don't need to install it separately.
 
@@ -58,8 +60,8 @@ If you want to build from source or contribute to the project:
 1. **Clone this repository**
 
    ```bash
-   git clone https://github.com/yourusername/pitchshifter.git
-   cd pitchshifter
+   git clone https://github.com/papura-octavian/Pitch_changher.git
+   cd Pitch_changher
    ```
 
 2. **Create and activate a virtual environment (recommended)**
@@ -152,7 +154,9 @@ The project uses GitHub Actions to automatically build installers when you creat
 1. Create a tag: `git tag v1.0.0`
 2. Push the tag: `git push origin v1.0.0`
 3. GitHub Actions will automatically build both Windows and Linux installers
-4. The installers will be attached to the GitHub Release
+4. Download the installers from the [Actions artifacts](https://github.com/papura-octavian/Pitch_changher/actions) or attach them manually to the GitHub Release
+
+**Note**: Build artifacts are available in the Actions tab. You can download them and attach to releases manually if automatic release creation fails.
 
 ---
 
