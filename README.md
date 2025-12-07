@@ -42,7 +42,7 @@ PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting o
 
 ### 🚀 Quick Install (Recommended)
 
-Download the pre-built installer for your operating system from the [Releases](https://github.com/papura-octavian/pitchshifter/releases) page:
+Download the pre-built installer for your operating system from the [Releases](https://github.com/papura-octavian/Pitch_changher/releases) page:
 
 - **Windows**: Download `PitchShifter-Setup-*.exe` and run it. The installer will guide you through the setup.
 - **Linux**: Download `PitchShifter-*-x86_64.AppImage`, make it executable (`chmod +x PitchShifter-*.AppImage`), and run it.
