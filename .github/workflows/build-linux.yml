@@ -58,11 +58,13 @@ jobs:
         Type=Application
         Name=PitchShifter
         Comment=Pitch shifting tool for audio and video files
-        Exec=pitchshifter
+        Exec=PitchShifter
         Icon=pitchshifter
         Categories=AudioVideo;Audio;Video;
         Terminal=false
         EOF
+        # Copy desktop file to AppDir root (appimagetool requirement)
+        cp AppDir/usr/share/applications/pitchshifter.desktop AppDir/pitchshifter.desktop
         
     - name: Create AppRun
       run: |
