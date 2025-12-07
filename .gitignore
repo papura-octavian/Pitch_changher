@@ -39,3 +39,6 @@ Thumbs.db
 # Build artifacts
 *.log
 
+# Icons (keep the directory but ignore if you want to track icons separately)
+# icons/*.ico
+# icons/*.png

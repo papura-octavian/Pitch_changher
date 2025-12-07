@@ -71,6 +71,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None,  # You can add an icon file here if you have one
+    icon='icons/icon.ico' if os.path.exists('icons/icon.ico') else None,
 )
 

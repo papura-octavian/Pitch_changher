@@ -32,6 +32,14 @@ jobs:
           Write-Host "Warning: FFmpeg not found in expected location"
         }
         
+    - name: Check for icon file
+      run: |
+        if (Test-Path "icons\icon.ico") {
+          Write-Host "Icon file found: icons\icon.ico"
+        } else {
+          Write-Host "Warning: Icon file not found at icons\icon.ico, building without icon"
+        }
+        
     - name: Build executable with PyInstaller
       run: |
         pyinstaller --clean --noconfirm Pitch_Changher.spec

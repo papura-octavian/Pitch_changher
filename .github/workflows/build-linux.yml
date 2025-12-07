@@ -22,7 +22,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libasound2-dev libpulse-dev libjack-dev libfuse2
+        sudo apt-get install -y libasound2-dev libpulse-dev libjack-dev libfuse2 imagemagick
         
     - name: Install Python dependencies
       run: |
@@ -51,6 +51,21 @@ jobs:
         cp dist/PitchShifter AppDir/usr/bin/
         cp -r ffmpeg AppDir/usr/
         
+    - name: Convert icon and add to AppDir
+      run: |
+        if [ -f "icons/icon.ico" ]; then
+          # Convert ICO to PNG using ImageMagick
+          convert icons/icon.ico -resize 256x256 AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
+          # Also copy to AppDir root for appimagetool
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png AppDir/pitchshifter.png
+          echo "Icon converted and added"
+        else
+          # Create a simple placeholder icon if none exists
+          convert -size 256x256 xc:transparent -fill "#38bdf8" -draw "circle 128,128 128,64" -fill white -pointsize 100 -gravity center -annotate +0+0 "PS" AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png AppDir/pitchshifter.png
+          echo "Placeholder icon created"
+        fi
+        
     - name: Create desktop file
       run: |
         cat > AppDir/usr/share/applications/pitchshifter.desktop << 'EOF'
@@ -59,6 +74,7 @@ jobs:
         Name=PitchShifter
         Comment=Pitch shifting tool for audio and video files
         Exec=PitchShifter
+        Icon=pitchshifter
         Categories=AudioVideo;Audio;Video;
         Terminal=false
         EOF
@@ -100,4 +116,3 @@ jobs:
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
