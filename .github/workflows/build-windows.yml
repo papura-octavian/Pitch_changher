@@ -82,6 +82,10 @@ jobs:
         if (-not (Test-Path "installer")) {
           New-Item -ItemType Directory -Path "installer"
         }
+        # Update installer.iss to include icon if it exists
+        if (Test-Path "icons\icon.ico") {
+          (Get-Content installer.iss) -replace '; SetupIconFile=icons\\icon.ico', 'SetupIconFile=icons\icon.ico' | Set-Content installer.iss
+        }
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
         
     - name: Get version from tag
@@ -103,11 +107,11 @@ jobs:
         
     - name: Create Release (if tag)
       if: startsWith(github.ref, 'refs/tags/')
+      continue-on-error: true
       uses: softprops/action-gh-release@v1
       with:
         files: installer/*.exe
         draft: false
         prerelease: false
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        token: ${{ secrets.GITHUB_TOKEN }}
 
