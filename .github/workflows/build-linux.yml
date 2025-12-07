@@ -53,24 +53,26 @@ jobs:
         
     - name: Convert icon and add to AppDir
       run: |
+        ICON_PATH="AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png"
         if [ -f "icons/icon.ico" ]; then
           # Convert ICO to PNG using ImageMagick
-          convert icons/icon.ico -resize 256x256 AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
-          # Verify file was created before copying
-          if [ -f "AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png" ]; then
-            # Also copy to AppDir root for appimagetool
-            cp AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png AppDir/pitchshifter.png
-            echo "Icon converted and added"
-          else
+          echo "Converting icon.ico to PNG..."
+          convert icons/icon.ico -resize 256x256 "$ICON_PATH" || {
             echo "Warning: Icon conversion failed, creating placeholder"
-            convert -size 256x256 xc:transparent -fill "#38bdf8" -draw "circle 128,128 128,64" -fill white -pointsize 100 -gravity center -annotate +0+0 "PS" AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
-            cp AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png AppDir/pitchshifter.png
-          fi
+            convert -size 256x256 xc:transparent -fill "#38bdf8" -draw "circle 128,128 128,64" -fill white -pointsize 100 -gravity center -annotate +0+0 "PS" "$ICON_PATH"
+          }
         else
           # Create a simple placeholder icon if none exists
-          convert -size 256x256 xc:transparent -fill "#38bdf8" -draw "circle 128,128 128,64" -fill white -pointsize 100 -gravity center -annotate +0+0 "PS" AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
-          cp AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png AppDir/pitchshifter.png
-          echo "Placeholder icon created"
+          echo "Creating placeholder icon..."
+          convert -size 256x256 xc:transparent -fill "#38bdf8" -draw "circle 128,128 128,64" -fill white -pointsize 100 -gravity center -annotate +0+0 "PS" "$ICON_PATH"
+        fi
+        # Verify file was created and copy to AppDir root
+        if [ -f "$ICON_PATH" ]; then
+          cp "$ICON_PATH" AppDir/pitchshifter.png
+          echo "Icon added successfully"
+        else
+          echo "Error: Failed to create icon file"
+          exit 1
         fi
         
     - name: Create desktop file
