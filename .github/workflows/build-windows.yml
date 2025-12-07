@@ -40,7 +40,26 @@ jobs:
       run: |
         $innosetupUrl = "https://jrsoftware.org/download.php/is.exe"
         $innosetupPath = "$env:TEMP\innosetup.exe"
-        Invoke-WebRequest -Uri $innosetupUrl -OutFile $innosetupPath
+        $maxRetries = 3
+        $retryCount = 0
+        $success = $false
+        while (-not $success -and $retryCount -lt $maxRetries) {
+          try {
+            Write-Host "Attempting to download Inno Setup (attempt $($retryCount + 1))..."
+            Invoke-WebRequest -Uri $innosetupUrl -OutFile $innosetupPath -TimeoutSec 60 -UseBasicParsing
+            $success = $true
+            Write-Host "Download successful!"
+          } catch {
+            $retryCount++
+            Write-Host "Download failed: $($_.Exception.Message)"
+            if ($retryCount -lt $maxRetries) {
+              Write-Host "Retrying in 5 seconds..."
+              Start-Sleep -Seconds 5
+            } else {
+              throw "Failed to download Inno Setup after $maxRetries attempts"
+            }
+          }
+        }
         
     - name: Install Inno Setup (silent)
       run: |
