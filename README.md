@@ -227,16 +227,7 @@ The project uses GitHub Actions to automatically build installers when you creat
 
   * Check the input file is valid and not DRM-protected.
   * Try leaving **Resample** on **Keep original**.
-  * Try a smaller pitch shift (extreme values can sometimes sound unnatural).
-
----
-
-## License
-
-Add your license of choice here, for example:
-
-* MIT, Apache-2.0, etc.
-
+  * Try a smaller pitch shift (extreme values can sometimes sound unnatural)
 ---
 
 ## Roadmap / Ideas
