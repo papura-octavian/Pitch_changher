@@ -22,7 +22,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libasound2-dev libpulse-dev libjack-dev
+        sudo apt-get install -y libasound2-dev libpulse-dev libjack-dev libfuse2
         
     - name: Install Python dependencies
       run: |
@@ -80,7 +80,8 @@ jobs:
         if [ "$VERSION" = "$GITHUB_REF" ]; then
           VERSION="dev"
         fi
-        ARCH=x86_64 ./appimagetool.AppImage AppDir PitchShifter-${VERSION}-x86_64.AppImage
+        # Use --appimage-extract-and-run to avoid FUSE requirement
+        ARCH=x86_64 ./appimagetool.AppImage --appimage-extract-and-run AppDir PitchShifter-${VERSION}-x86_64.AppImage
         
     - name: Upload AppImage artifact
       uses: actions/upload-artifact@v4
