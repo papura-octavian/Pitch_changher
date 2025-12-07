@@ -84,7 +84,21 @@ jobs:
         }
         # Update installer.iss to include icon if it exists
         if (Test-Path "icons\icon.ico") {
-          (Get-Content installer.iss) -replace '; SetupIconFile=icons\\icon.ico', 'SetupIconFile=icons\icon.ico' | Set-Content installer.iss
+          Write-Host "Icon found at icons\icon.ico, enabling SetupIconFile"
+          $lines = Get-Content installer.iss
+          $newLines = @()
+          foreach ($line in $lines) {
+            if ($line -match '^\s*; SetupIconFile=icons\\icon.ico') {
+              $newLines += $line -replace '^\s*; SetupIconFile=icons\\icon.ico.*', 'SetupIconFile=icons\icon.ico'
+              Write-Host "Uncommented SetupIconFile line"
+            } else {
+              $newLines += $line
+            }
+          }
+          Set-Content installer.iss -Value $newLines
+          Write-Host "Updated installer.iss with icon path"
+        } else {
+          Write-Host "No icon found at icons\icon.ico, building without icon"
         }
         & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
         
