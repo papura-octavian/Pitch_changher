@@ -47,7 +47,7 @@ Download the pre-built installer for your operating system from the [Releases](h
 - **Windows**: Download `PitchShifter-Setup-*.exe` from the latest release and run it. The installer will guide you through the setup.
 - **Linux**: Download `PitchShifter-*-x86_64.AppImage` from the latest release, make it executable (`chmod +x PitchShifter-*.AppImage`), and run it.
 
-**Latest Release**: [v1.0.9](https://github.com/papura-octavian/Pitch_changher/releases/latest)
+**Latest Release**: [v1.0.0](https://github.com/papura-octavian/Pitch_changher/releases/latest)
 
 **Note**: FFmpeg is bundled with the installers, so you don't need to install it separately.
 
