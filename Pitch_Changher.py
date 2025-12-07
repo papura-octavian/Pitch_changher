@@ -50,6 +50,41 @@ SUPPORTED_VIDEO_EXTS = {".mp4", ".mov", ".mkv"}
 MAX_SHIFT_SEMITONES = 24
 
 
+def get_ffmpeg_path() -> str:
+    """Get path to ffmpeg executable, preferring bundled version."""
+    import platform
+    import shutil
+    
+    # Get the directory where this script is located
+    if getattr(sys, 'frozen', False):
+        # Running as compiled executable (PyInstaller)
+        # sys._MEIPASS is the temporary directory where PyInstaller extracts files
+        base_dir = sys._MEIPASS
+    else:
+        # Running as script
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+    system = platform.system().lower()
+    if system == "windows":
+        bundled_ffmpeg = os.path.join(base_dir, "ffmpeg", "windows", "ffmpeg.exe")
+    else:
+        bundled_ffmpeg = os.path.join(base_dir, "ffmpeg", "linux", "ffmpeg")
+    
+    # Check if bundled ffmpeg exists and is executable
+    if os.path.exists(bundled_ffmpeg):
+        # On Windows, .exe files are always executable
+        # On Linux, check if it's executable
+        if system == "windows" or os.access(bundled_ffmpeg, os.X_OK):
+            return bundled_ffmpeg
+    
+    # Fallback to system ffmpeg in PATH
+    if shutil.which("ffmpeg"):
+        return "ffmpeg"
+    
+    # Last resort: return "ffmpeg" and hope it's in PATH
+    return "ffmpeg"
+
+
 @dataclass
 class JobConfig:
     in_path: str
@@ -152,8 +187,9 @@ class ProcessorThread(QThread):
             temp_shifted = os.path.join(td, "shifted.wav")
 
             # 1) Extract audio to WAV (keep original rate & channels)
+            ffmpeg_path = get_ffmpeg_path()
             cmd1 = [
-                "ffmpeg",
+                ffmpeg_path,
                 "-y",
                 "-i",
                 in_path,
@@ -184,7 +220,7 @@ class ProcessorThread(QThread):
                 self.cfg.out_path = out_path
 
             cmd2 = [
-                "ffmpeg",
+                ffmpeg_path,
                 "-y",
                 "-i",
                 in_path,

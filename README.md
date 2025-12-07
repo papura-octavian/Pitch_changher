@@ -33,31 +33,34 @@ PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting o
 
 ## Requirements
 
-- **Python**: 3.9+ (recommended)
-- **OS**: Windows or Linux
-- **FFmpeg**:
-  - Required and must be available in your `PATH`
-  - Used for extracting audio from video and remuxing processed audio back into MP4
-
-### Python Dependencies
-
-Install these with `pip`:
-
-- `PySide6` – GUI framework
-- `librosa` – audio processing (pitch shifting)
-- `soundfile` – reading/writing audio files
-- `numpy` – numerical operations
-- `pydub` – exporting MP3 via ffmpeg
+- **OS**: Windows 10/11 or Linux (x86_64)
+- **FFmpeg**: Included in the installers (no separate installation needed)
 
 ---
 
 ## Installation
 
+### 🚀 Quick Install (Recommended)
+
+Download the pre-built installer for your operating system from the [Releases](https://github.com/papura-octavian/pitchshifter/releases) page:
+
+- **Windows**: Download `PitchShifter-Setup-*.exe` and run it. The installer will guide you through the setup.
+- **Linux**: Download `PitchShifter-*-x86_64.AppImage`, make it executable (`chmod +x PitchShifter-*.AppImage`), and run it.
+
+**Note**: FFmpeg is bundled with the installers, so you don't need to install it separately.
+
+---
+
+### 🔧 Development Installation (From Source)
+
+If you want to build from source or contribute to the project:
+
 1. **Clone this repository**
 
    ```bash
-   git clone https://github.com/<your-username>/pitchshifter.git
+   git clone https://github.com/yourusername/pitchshifter.git
    cd pitchshifter
+   ```
 
 2. **Create and activate a virtual environment (recommended)**
 
@@ -78,10 +81,10 @@ Install these with `pip`:
 4. **Install dependencies**
 
    ```bash
-   pip install PySide6 librosa soundfile numpy pydub
+   pip install -r requirements.txt
    ```
 
-5. **Install FFmpeg**
+5. **Install FFmpeg** (if not using bundled version)
 
    * **Windows**: Download from the official FFmpeg site, extract it, and add the `bin` directory to your `PATH`.
    * **Linux**: Usually available via package manager, for example:
@@ -98,17 +101,58 @@ Install these with `pip`:
 
    from a terminal/command prompt.
 
+   **Note**: The application will automatically use the bundled FFmpeg in the `ffmpeg/` directory if available, otherwise it will fall back to the system FFmpeg in PATH.
+
 ---
 
 ## Running the App
 
+### From Installer
+
+- **Windows**: Launch PitchShifter from the Start Menu or desktop shortcut.
+- **Linux**: Double-click the AppImage file or run it from terminal: `./PitchShifter-*.AppImage`
+
+### From Source
+
 From the project folder, run:
 
 ```bash
-python pitchshifter.py
+python Pitch_Changher.py
 ```
 
 The PitchShifter window should appear.
+
+---
+
+## Building Installers
+
+If you want to build your own installers:
+
+### Windows
+
+1. Install [Inno Setup](https://jrsoftware.org/isdl.php)
+2. Run:
+   ```batch
+   build_installer_windows.bat
+   ```
+   This will create `installer/PitchShifter-Setup-*.exe`
+
+### Linux
+
+Run:
+```bash
+./build_appimage.sh [version]
+```
+This will create `PitchShifter-[version]-x86_64.AppImage`
+
+### Automated Builds
+
+The project uses GitHub Actions to automatically build installers when you create a release tag:
+
+1. Create a tag: `git tag v1.0.0`
+2. Push the tag: `git push origin v1.0.0`
+3. GitHub Actions will automatically build both Windows and Linux installers
+4. The installers will be attached to the GitHub Release
 
 ---
 

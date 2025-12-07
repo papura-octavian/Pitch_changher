@@ -1,0 +1,86 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools wheel
+        pip install -r requirements.txt
+        
+    - name: Make ffmpeg executable (if needed)
+      run: |
+        if (Test-Path "ffmpeg\windows\ffmpeg.exe") {
+          Write-Host "FFmpeg found"
+        } else {
+          Write-Host "Warning: FFmpeg not found in expected location"
+        }
+        
+    - name: Build executable with PyInstaller
+      run: |
+        pyinstaller --clean --noconfirm Pitch_Changher.spec
+        
+    - name: Download Inno Setup
+      run: |
+        $innosetupUrl = "https://jrsoftware.org/download.php/is.exe"
+        $innosetupPath = "$env:TEMP\innosetup.exe"
+        Invoke-WebRequest -Uri $innosetupUrl -OutFile $innosetupPath
+        
+    - name: Install Inno Setup (silent)
+      run: |
+        $innosetupPath = "$env:TEMP\innosetup.exe"
+        $installPath = "C:\Program Files (x86)\Inno Setup 6"
+        Start-Process -FilePath $innosetupPath -ArgumentList "/VERYSILENT /DIR=$installPath" -Wait
+        $env:PATH = "$installPath;$env:PATH"
+        echo "$installPath" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        
+    - name: Build installer
+      run: |
+        if (-not (Test-Path "installer")) {
+          New-Item -ItemType Directory -Path "installer"
+        }
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+        
+    - name: Get version from tag
+      id: get_version
+      run: |
+        if ($env:GITHUB_REF -match 'refs/tags/v(.+)') {
+          $version = $matches[1]
+        } else {
+          $version = "dev"
+        }
+        echo "version=$version" >> $env:GITHUB_OUTPUT
+        
+    - name: Upload installer artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: PitchShifter-Windows-Installer
+        path: installer/*.exe
+        retention-days: 30
+        
+    - name: Create Release (if tag)
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: installer/*.exe
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
