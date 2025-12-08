@@ -712,6 +712,26 @@ class PitchShifterApp(QWidget):
 
 def main() -> None:
     app = QApplication(sys.argv)
+
+
+    # Apply dark theme
+    from PySide6.QtGui import QPalette, QColor
+    palette = QPalette()
+    palette.setColor(QPalette.Window, QColor("#020617"))  # Deep navy background
+    palette.setColor(QPalette.WindowText, "#e5f4ff")     # Light text
+    palette.setColor(QPalette.Base, "#020617")           # Dark base
+    palette.setColor(QPalette.AlternateBase, "#020617")  # Dark alternate base
+    palette.setColor(QPalette.Text, "#e5f4ff")           # Light text
+    palette.setColor(QPalette.Button, "#020617")         # Dark button
+    palette.setColor(QPalette.ButtonText, "#e5f4ff")     # Light button text
+    palette.setColor(QPalette.Highlight, "#38bdf8")      # Accent color
+    palette.setColor(QPalette.HighlightedText, "#020617")# Dark text on accent
+    app.setPalette(palette)
+
+    # set style to ensure consistent rendering
+    app.setStyle("Fusion")
+
+    # Create and show the main application window
     w = PitchShifterApp()
     w.show()
     sys.exit(app.exec())

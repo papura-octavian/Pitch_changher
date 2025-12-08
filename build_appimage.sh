@@ -54,3 +54,5 @@ ARCH=x86_64 ./appimagetool.AppImage AppDir PitchShifter-${VERSION}-x86_64.AppIma
 echo ""
 echo "AppImage created: PitchShifter-${VERSION}-x86_64.AppImage"
 
+
+

@@ -29,3 +29,5 @@ pyinstaller --clean --noconfirm Pitch_Changher.spec
 echo ""
 echo "Build complete! Executable is in: dist/PitchShifter"
 
+
+
