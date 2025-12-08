@@ -51,8 +51,8 @@ jobs:
         cp dist/PitchShifter AppDir/usr/bin/
         cp -r ffmpeg AppDir/usr/
         
-        - name: Add existing PNG icon to AppDir
-        run: |
+    - name: Add existing PNG icon to AppDir
+      run: |
           ICON_PATH="icons/icon.png"
       
           if [ -f "$ICON_PATH" ]; then
