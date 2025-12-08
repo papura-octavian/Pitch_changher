@@ -50,8 +50,6 @@ jobs:
         mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
         cp dist/PitchShifter AppDir/usr/bin/
         cp -r ffmpeg AppDir/usr/
-    - name: Add icon to AppDir
-      run: |
         ICON_PATH="icons/icon.png"
         if [ -f "$ICON_PATH" ]; then
           echo "Using existing PNG icon..."
