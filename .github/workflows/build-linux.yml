@@ -51,25 +51,25 @@ jobs:
         cp dist/PitchShifter AppDir/usr/bin/
         cp -r ffmpeg AppDir/usr/
         
-    - name: Add existing PNG icon to AppDir
+    - name: Add icon to AppDir
       run: |
-          ICON_PATH="icons/icon.png"
-      
-          if [ -f "$ICON_PATH" ]; then
-            echo "Using existing PNG icon..."
-          else
-            echo "Error: $ICON_PATH not found!"
-            exit 1
-          fi
-      
-          # Creează folderul de icons dacă nu există
-          mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
-      
-          # Copiază iconul unde trebuie
-          cp "$ICON_PATH" AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
-          cp "$ICON_PATH" AppDir/pitchshifter.png
-      
-          echo "Icon added successfully"
+            ICON_PATH="icons/icon.ico"
+        
+            if [ -f "$ICON_PATH" ]; then
+              echo "Using existing PNG icon..."
+            else
+              echo "Error: $ICON_PATH not found!"
+              exit 1
+            fi
+        
+            # Creează folderul de icons dacă nu există
+            mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
+        
+            # Copiază iconul unde trebuie
+            cp "$ICON_PATH" AppDir/usr/share/icons/hicolor/256x256/apps/pitchshifter.png
+            cp "$ICON_PATH" AppDir/pitchshifter.png
+        
+            echo "Icon added successfully"
       
         
     - name: Create desktop file
