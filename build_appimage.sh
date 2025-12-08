@@ -55,4 +55,3 @@ echo ""
 echo "AppImage created: PitchShifter-${VERSION}-x86_64.AppImage"
 
 
-
