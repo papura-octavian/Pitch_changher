@@ -17,6 +17,9 @@ build/
 *.spec.bak
 *.manifest
 
+# FFmpeg binaries (downloaded via scripts/get_ffmpeg.py, not tracked)
+ffmpeg/
+
 # Installer
 installer/
 *.exe
@@ -38,7 +41,3 @@ Thumbs.db
 
 # Build artifacts
 *.log
-
-# Icons (keep the directory but ignore if you want to track icons separately)
-# icons/*.ico
-# icons/*.png

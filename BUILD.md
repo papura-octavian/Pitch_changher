@@ -4,156 +4,95 @@ This document explains how to build installers for PitchShifter.
 
 ## Prerequisites
 
-### For Windows:
-- Python 3.9+
-- [Inno Setup](https://jrsoftware.org/isdl.php) (for creating the installer)
+- **Windows**: Python 3.10+, [Inno Setup](https://jrsoftware.org/isdl.php)
+- **Linux**: Python 3.10+ (AppImageTool is downloaded automatically)
 
-### For Linux:
-- Python 3.9+
-- AppImageTool (automatically downloaded by the build script)
+FFmpeg binaries are **not** tracked in git. The build scripts download them
+automatically via `scripts/get_ffmpeg.py` (Windows: gyan.dev release build,
+Linux: johnvansickle static build).
 
 ## Quick Build
 
 ### Windows
+
 ```batch
 build_installer_windows.bat
 ```
 
-This will:
-1. Create a virtual environment
-2. Install dependencies
-3. Build the executable with PyInstaller
-4. Create a Windows installer using Inno Setup
+This creates a venv, installs dependencies, downloads FFmpeg, builds the
+executable with PyInstaller and compiles the installer with Inno Setup.
 
-Output: `installer/PitchShifter-Setup-1.0.0.exe`
+Output: `installer/PitchShifter-Setup-<version>.exe`
 
 ### Linux
+
 ```bash
 ./build_appimage.sh [version]
 ```
-
-This will:
-1. Create a virtual environment
-2. Install dependencies
-3. Build the executable with PyInstaller
-4. Create an AppImage
 
 Output: `PitchShifter-[version]-x86_64.AppImage`
 
 ## Manual Build Steps
 
-### 1. Build Executable Only
+### 1. Build the executable only
 
-**Windows:**
-```batch
-build_windows.bat
-```
+- **Windows**: `build_windows.bat` → `dist/PitchShifter.exe`
+- **Linux**: `./build_linux.sh` → `dist/PitchShifter`
 
-**Linux:**
-```bash
-./build_linux.sh
-```
+The scripts copy `ffmpeg/` next to the executable so it runs standalone.
 
-This creates `dist/PitchShifter.exe` (Windows) or `dist/PitchShifter` (Linux).
+### 2. Create the installer
 
-### 2. Create Installer
-
-**Windows:**
-1. Install Inno Setup
-2. Open `installer.iss` in Inno Setup Compiler
-3. Click "Build" → "Compile"
-
-Or use the command line:
-```batch
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
-```
-
-**Linux:**
-```bash
-./build_appimage.sh
-```
+- **Windows**:
+  ```batch
+  "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DMyAppVersion=1.1.0 installer.iss
+  ```
+- **Linux**: `./build_appimage.sh 1.1.0`
 
 ## Automated Builds with GitHub Actions
 
-The project includes GitHub Actions workflows that automatically build installers when you create a release tag.
+The **Build Installers** workflow (`.github/workflows/build.yml`) runs on
+every `v*` tag and on manual dispatch:
 
-### How to Trigger Automated Builds
-
-1. **Create a tag:**
+1. Create and push a tag:
    ```bash
-   git tag v1.0.0
-   git push origin v1.0.0
+   git tag v1.1.0
+   git push origin v1.1.0
    ```
+2. The workflow builds the Windows installer and the Linux AppImage in
+   parallel and attaches both to the GitHub Release for that tag.
+3. For manual runs (Actions → Build Installers → Run workflow), the
+   installers are available as workflow artifacts instead.
 
-2. **Or create a release on GitHub:**
-   - Go to "Releases" → "Create a new release"
-   - Create a new tag (e.g., `v1.0.0`)
-   - GitHub Actions will automatically build and attach installers
+## FFmpeg lookup order (at runtime)
 
-3. **Check the build status:**
-   - Go to "Actions" tab in GitHub
-   - You'll see two workflows: "Build Windows Installer" and "Build Linux AppImage"
-
-4. **Download installers:**
-   - Once builds complete, go to the Release page
-   - Download the installers from the release assets
-
-## Customizing the Installer
-
-### Windows (Inno Setup)
-
-Edit `installer.iss` to customize:
-- App name, version, publisher
-- Installation directory
-- Desktop/Start Menu shortcuts
-- License file
-- Installer icon
-
-### Linux (AppImage)
-
-Edit `build_appimage.sh` to customize:
-- App name
-- Desktop file metadata
-- Icon (add to `AppDir/usr/share/icons/`)
+1. `ffmpeg/<os>/ffmpeg[.exe]` next to the executable (installed layout)
+2. `../ffmpeg/<os>/ffmpeg` relative to the executable (AppImage layout)
+3. `ffmpeg` from `PATH`
 
 ## Troubleshooting
 
-### PyInstaller Issues
-
-- **"Module not found"**: Add missing modules to `hiddenimports` in `Pitch_Changher.spec`
-- **Large executable size**: This is normal due to bundled libraries (librosa, numpy, etc.)
-- **FFmpeg not found**: Make sure `ffmpeg/` directory contains the binaries
-
-### Inno Setup Issues
-
-- **"iscc not found"**: Add Inno Setup to your PATH or use full path to `ISCC.exe`
-- **Installer doesn't run**: Check that the executable was built successfully first
-
-### AppImage Issues
-
-- **"Permission denied"**: Run `chmod +x appimagetool.AppImage`
-- **AppImage doesn't run**: Make sure it's executable: `chmod +x PitchShifter-*.AppImage`
+- **PyInstaller "Module not found"**: add the module to `hiddenimports` in
+  `Pitch_Changher.spec`.
+- **Large executable size**: normal — librosa/numpy/PySide6 are bundled.
+- **`iscc` not found**: add Inno Setup to PATH or use the full path to
+  `ISCC.exe`.
+- **AppImage permission denied**: `chmod +x PitchShifter-*.AppImage`.
 
 ## File Structure
 
 ```
 Pitch_changher/
-├── Pitch_Changher.py          # Main application
-├── Pitch_Changher.spec        # PyInstaller spec file
-├── requirements.txt           # Python dependencies
-├── build_windows.bat         # Windows build script
-├── build_linux.sh            # Linux build script
-├── build_installer_windows.bat  # Windows installer script
-├── build_appimage.sh         # Linux AppImage script
-├── installer.iss              # Inno Setup script
-├── ffmpeg/                    # Bundled FFmpeg binaries
-│   ├── windows/
-│   └── linux/
-└── .github/workflows/         # GitHub Actions workflows
-    ├── build-windows.yml
-    └── build-linux.yml
+├── Pitch_Changher.py            # Application (UI + processing)
+├── Pitch_Changher.spec          # PyInstaller spec
+├── requirements.txt             # Runtime dependencies
+├── requirements-dev.txt         # + PyInstaller (build)
+├── scripts/get_ffmpeg.py        # Downloads FFmpeg for the current OS
+├── build_windows.bat            # Windows executable build
+├── build_installer_windows.bat  # Windows installer build
+├── build_linux.sh               # Linux executable build
+├── build_appimage.sh            # Linux AppImage build
+├── installer.iss                # Inno Setup script
+├── icons/                       # App icons
+└── .github/workflows/build.yml  # CI: installers on tag push
 ```
-
-
-
-

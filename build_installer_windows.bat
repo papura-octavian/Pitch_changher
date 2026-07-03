@@ -15,16 +15,9 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b 1
 )
 
-REM Create installer directory
-if not exist installer mkdir installer
-
-REM Compile installer
+REM Compile installer (version can be overridden: iscc /DMyAppVersion=x.y.z installer.iss)
 iscc installer.iss
 
 echo.
-echo Installer created in: installer\PitchShifter-Setup-1.0.0.exe
+echo Installer created in the installer\ directory.
 pause
-
-
-
-

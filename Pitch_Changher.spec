@@ -1,55 +1,38 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 import os
-import sys
-import platform
 
-block_cipher = None
-
-# Get the base directory
 base_dir = os.path.dirname(os.path.abspath(SPEC))
 
-# Determine OS
-system = platform.system().lower()
-
-# Collect data files (ffmpeg binaries)
+# FFmpeg is intentionally NOT bundled inside the executable: the installer /
+# AppImage ships it next to the app instead. Bundling it in a onefile exe
+# would double the download size and slow down every launch (extraction).
 datas = []
-if system == "windows":
-    ffmpeg_dir = os.path.join(base_dir, "ffmpeg", "windows")
-    if os.path.exists(ffmpeg_dir):
-        # Include entire ffmpeg/windows directory
-        datas.append((ffmpeg_dir, "ffmpeg/windows"))
-else:
-    ffmpeg_dir = os.path.join(base_dir, "ffmpeg", "linux")
-    if os.path.exists(ffmpeg_dir):
-        # Include entire ffmpeg/linux directory
-        datas.append((ffmpeg_dir, "ffmpeg/linux"))
+icon_png = os.path.join(base_dir, "icons", "icon.png")
+if os.path.exists(icon_png):
+    datas.append((icon_png, "icons"))
 
 a = Analysis(
     ['Pitch_Changher.py'],
     pathex=[],
     binaries=[],
     datas=datas,
-    hiddenimports=[
-        'librosa',
-        'soundfile',
-        'numpy',
-        'pydub',
-        'PySide6.QtCore',
-        'PySide6.QtGui',
-        'PySide6.QtWidgets',
-    ],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
+    excludes=[
+        # Trim libraries PyInstaller tends to pull in via numpy/librosa
+        'matplotlib',
+        'tkinter',
+        'IPython',
+        'pandas',
+        'PIL',
+    ],
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
@@ -73,4 +56,3 @@ exe = EXE(
     entitlements_file=None,
     icon='icons/icon.ico' if os.path.exists('icons/icon.ico') else None,
 )
-

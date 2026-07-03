@@ -1,20 +1,23 @@
 """
 PitchShifter — Windows and Linux
 
-- Load MP3/WAV/MP4
-- Shift pitch by semitones (±24)
-- Choose semitone or tone units (1 tone = 2 semitones)
-- Export WAV/MP3 or MP4 (video remux with shifted audio)
+- Load MP3/WAV/OGG/FLAC/M4A/AAC or MP4/MOV/MKV
+- Shift pitch by semitones (±24) or tones (±12)
+- Export WAV/MP3 (audio) or MP4 (video remux with shifted audio)
 
 Install in venv:
     python -m pip install --upgrade pip setuptools wheel
-    pip install PySide6 librosa soundfile numpy pydub
+    pip install -r requirements.txt
 
-Requires FFmpeg in PATH for MP3/MP4.
+FFmpeg is looked up in ./ffmpeg/<os>/ next to the app, then in PATH.
+Run scripts/get_ffmpeg.py to download a bundled copy.
 """
 from __future__ import annotations
 
 import os
+import platform
+import shutil
+import subprocess
 import sys
 import tempfile
 import traceback
@@ -24,10 +27,9 @@ from typing import Optional
 import numpy as np
 import librosa
 import soundfile as sf
-from pydub import AudioSegment
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
@@ -47,42 +49,63 @@ from PySide6.QtWidgets import (
 SUPPORTED_AUDIO_EXTS = {".wav", ".mp3", ".ogg", ".flac", ".m4a", ".aac"}
 SUPPORTED_VIDEO_EXTS = {".mp4", ".mov", ".mkv"}
 
+# Formats libsndfile can decode directly; everything else goes through ffmpeg
+_DIRECT_DECODE_EXTS = {".wav", ".flac", ".ogg"}
+
 MAX_SHIFT_SEMITONES = 24
+
+_ffmpeg_path: Optional[str] = None
 
 
 def get_ffmpeg_path() -> str:
-    """Get path to ffmpeg executable, preferring bundled version."""
-    import platform
-    import shutil
-    
-    # Get the directory where this script is located
-    if getattr(sys, 'frozen', False):
-        # Running as compiled executable (PyInstaller)
-        # sys._MEIPASS is the temporary directory where PyInstaller extracts files
-        base_dir = sys._MEIPASS
+    """Get path to ffmpeg executable, preferring a bundled copy (cached)."""
+    global _ffmpeg_path
+    if _ffmpeg_path is not None:
+        return _ffmpeg_path
+
+    is_windows = platform.system().lower() == "windows"
+    subdir = "windows" if is_windows else "linux"
+    exe = "ffmpeg.exe" if is_windows else "ffmpeg"
+
+    candidates = []
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        # Installed layout: ffmpeg/ next to the executable
+        candidates.append(os.path.join(exe_dir, "ffmpeg", subdir, exe))
+        # AppImage layout: usr/bin/PitchShifter with ffmpeg/ in usr/
+        candidates.append(os.path.join(exe_dir, "..", "ffmpeg", subdir, exe))
+        # Onefile bundles extracted to _MEIPASS
+        if hasattr(sys, "_MEIPASS"):
+            candidates.append(os.path.join(sys._MEIPASS, "ffmpeg", subdir, exe))
     else:
-        # Running as script
         base_dir = os.path.dirname(os.path.abspath(__file__))
-    
-    system = platform.system().lower()
-    if system == "windows":
-        bundled_ffmpeg = os.path.join(base_dir, "ffmpeg", "windows", "ffmpeg.exe")
-    else:
-        bundled_ffmpeg = os.path.join(base_dir, "ffmpeg", "linux", "ffmpeg")
-    
-    # Check if bundled ffmpeg exists and is executable
-    if os.path.exists(bundled_ffmpeg):
-        # On Windows, .exe files are always executable
-        # On Linux, check if it's executable
-        if system == "windows" or os.access(bundled_ffmpeg, os.X_OK):
-            return bundled_ffmpeg
-    
-    # Fallback to system ffmpeg in PATH
-    if shutil.which("ffmpeg"):
-        return "ffmpeg"
-    
-    # Last resort: return "ffmpeg" and hope it's in PATH
-    return "ffmpeg"
+        candidates.append(os.path.join(base_dir, "ffmpeg", subdir, exe))
+
+    for cand in candidates:
+        cand = os.path.normpath(cand)
+        if os.path.isfile(cand) and (is_windows or os.access(cand, os.X_OK)):
+            _ffmpeg_path = cand
+            return cand
+
+    _ffmpeg_path = shutil.which("ffmpeg") or "ffmpeg"
+    return _ffmpeg_path
+
+
+def run_ffmpeg(args: list[str], action: str) -> None:
+    """Run ffmpeg with the given arguments, raising on failure."""
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.CREATE_NO_WINDOW
+    proc = subprocess.run(
+        [get_ffmpeg_path(), *args],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        creationflags=creationflags,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg {action} failed:\n" + proc.stderr.decode(errors="ignore")
+        )
 
 
 @dataclass
@@ -119,55 +142,63 @@ class ProcessorThread(QThread):
             self.failed.emit(f"Error: {e}\n\n{tb}")
 
     # --- helpers ---
+    def _load_audio(self, in_audio_path: str) -> tuple[np.ndarray, int]:
+        """Load audio as (channels, samples), decoding via ffmpeg when needed."""
+        ext = os.path.splitext(in_audio_path)[1].lower()
+        tmp_decoded = None
+        src = in_audio_path
+        if ext not in _DIRECT_DECODE_EXTS:
+            # Decode compressed formats with the bundled ffmpeg so we don't
+            # depend on system codecs being installed
+            fd, tmp_decoded = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+            run_ffmpeg(
+                ["-y", "-i", in_audio_path, "-vn", "-acodec", "pcm_s16le", tmp_decoded],
+                "decode audio",
+            )
+            src = tmp_decoded
+        try:
+            y, sr = librosa.load(src, sr=self.cfg.sr, mono=False)
+        finally:
+            if tmp_decoded:
+                os.remove(tmp_decoded)
+        return np.atleast_2d(y), int(sr)
+
     def _process_audio(self, in_audio_path: str, out_audio_path: str) -> None:
         self.progressed.emit(10)
 
-        # mono=False -> y is (n_channels, n_samples) or (n_samples,)
-        y, sr = librosa.load(in_audio_path, sr=self.cfg.sr, mono=False)
+        y, sr = self._load_audio(in_audio_path)
         self.progressed.emit(30)
 
-        if y.ndim == 1:
-            y_list = [y]
-        else:
-            # y shape: (channels, samples)
-            y_list = [y[ch, :] for ch in range(y.shape[0])]
+        # Pad very short signals so the STFT inside pitch_shift has enough
+        # samples, then trim back to the original length
+        n = y.shape[1]
+        if n < 2048:
+            y = np.pad(y, ((0, 0), (0, 2048 - n)))
 
-        processed_channels = []
-        for sig in y_list:
-            sig = np.ascontiguousarray(sig.reshape(-1))
-            n = len(sig)
-
-            # Ensure enough samples for STFT inside pitch_shift
-            if n < 2048:
-                pad = 2048 - n
-                sig = np.pad(sig, (0, pad))
-
-            shifted = librosa.effects.pitch_shift(
-                sig,
-                sr=sr,
-                n_steps=self.cfg.semitone_shift,
-            )
-            processed_channels.append(shifted)
-
-        if len(processed_channels) > 1:
-            # (samples, channels) for soundfile
-            Y = np.stack(processed_channels, axis=1)
-        else:
-            Y = processed_channels[0]
+        shifted = librosa.effects.pitch_shift(
+            y, sr=sr, n_steps=self.cfg.semitone_shift
+        )
+        shifted = shifted[:, :n]
+        Y = shifted.T if shifted.shape[0] > 1 else shifted[0]
 
         self.progressed.emit(70)
 
         out_ext = os.path.splitext(out_audio_path)[1].lower()
-        if out_ext == ".wav":
-            sf.write(out_audio_path, Y, sr)
-        elif out_ext == ".mp3":
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp_path = tmp.name
-            sf.write(tmp_path, Y, sr)
-            AudioSegment.from_wav(tmp_path).export(out_audio_path, format="mp3")
-            os.remove(tmp_path)
+        if out_ext == ".mp3":
+            fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+            os.close(fd)
+            try:
+                sf.write(tmp_path, Y, sr)
+                run_ffmpeg(
+                    ["-y", "-i", tmp_path, "-codec:a", "libmp3lame", "-q:a", "2",
+                     out_audio_path],
+                    "encode mp3",
+                )
+            finally:
+                os.remove(tmp_path)
         else:
-            if not out_audio_path.lower().endswith(".wav"):
+            if out_ext != ".wav":
                 out_audio_path = out_audio_path + ".wav"
                 self.cfg.out_path = out_audio_path
             sf.write(out_audio_path, Y, sr)
@@ -175,9 +206,6 @@ class ProcessorThread(QThread):
         self.progressed.emit(90)
 
     def _process_video(self) -> None:
-        # Use ffmpeg CLI to avoid heavy Python video dependencies
-        import subprocess
-
         self.progressed.emit(12)
         in_path = self.cfg.in_path
         out_path = self.cfg.out_path
@@ -187,27 +215,10 @@ class ProcessorThread(QThread):
             temp_shifted = os.path.join(td, "shifted.wav")
 
             # 1) Extract audio to WAV (keep original rate & channels)
-            ffmpeg_path = get_ffmpeg_path()
-            cmd1 = [
-                ffmpeg_path,
-                "-y",
-                "-i",
-                in_path,
-                "-vn",
-                "-acodec",
-                "pcm_s16le",
-                temp_audio,
-            ]
-            p1 = subprocess.run(
-                cmd1,
-                shell=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+            run_ffmpeg(
+                ["-y", "-i", in_path, "-vn", "-acodec", "pcm_s16le", temp_audio],
+                "extract audio",
             )
-            if p1.returncode != 0:
-                raise RuntimeError(
-                    "ffmpeg extract audio failed:\n" + p1.stderr.decode(errors="ignore")
-                )
             self.progressed.emit(40)
 
             # 2) Process audio with librosa
@@ -219,34 +230,12 @@ class ProcessorThread(QThread):
                 out_path = out_path + ".mp4"
                 self.cfg.out_path = out_path
 
-            cmd2 = [
-                ffmpeg_path,
-                "-y",
-                "-i",
-                in_path,
-                "-i",
-                temp_shifted,
-                "-c:v",
-                "copy",
-                "-map",
-                "0:v:0",
-                "-map",
-                "1:a:0",
-                "-shortest",
-                "-c:a",
-                "aac",
-                out_path,
-            ]
-            p2 = subprocess.run(
-                cmd2,
-                shell=False,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+            run_ffmpeg(
+                ["-y", "-i", in_path, "-i", temp_shifted,
+                 "-c:v", "copy", "-map", "0:v:0", "-map", "1:a:0",
+                 "-shortest", "-c:a", "aac", out_path],
+                "mux",
             )
-            if p2.returncode != 0:
-                raise RuntimeError(
-                    "ffmpeg mux failed:\n" + p2.stderr.decode(errors="ignore")
-                )
             self.progressed.emit(95)
 
 
@@ -263,10 +252,11 @@ class PitchShifterApp(QWidget):
         super().__init__()
         self.setAcceptDrops(True)
         self.setWindowTitle("PitchShifter")
-        self.setMinimumSize(1000, 640)
+        self.setMinimumSize(760, 520)
+        self.resize(960, 600)
 
         self.in_path: Optional[str] = None
-        self.thread: Optional[ProcessorThread] = None
+        self.worker: Optional[ProcessorThread] = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(24, 24, 24, 24)
@@ -312,12 +302,12 @@ class PitchShifterApp(QWidget):
         self.file_label = QLabel("Drop a file here or click Open…")
         self.file_label.setObjectName("fileLabel")
 
-        btn_open = QPushButton("Open…")
-        btn_open.setObjectName("primaryButton")
-        btn_open.clicked.connect(self.choose_file)
+        self.btn_open = QPushButton("Open…")
+        self.btn_open.setObjectName("primaryButton")
+        self.btn_open.clicked.connect(self.choose_file)
 
         file_bar.addWidget(self.file_label, 1)
-        file_bar.addWidget(btn_open)
+        file_bar.addWidget(self.btn_open)
 
         # Main control card
         ctrl_frame = NeonFrame()
@@ -358,12 +348,8 @@ class PitchShifterApp(QWidget):
         self.shift_spin.setDecimals(2)
         self.shift_spin.setSingleStep(0.1)
 
-        self.shift_slider.valueChanged.connect(
-            lambda v: self.shift_spin.setValue(float(v))
-        )
-        self.shift_spin.valueChanged.connect(
-            lambda v: self.shift_slider.setValue(int(round(v)))
-        )
+        self.shift_slider.valueChanged.connect(self._slider_moved)
+        self.shift_spin.valueChanged.connect(self._spin_changed)
 
         shift_row.addWidget(self.shift_slider, 1)
         shift_row.addWidget(self.shift_spin)
@@ -425,10 +411,7 @@ class PitchShifterApp(QWidget):
         self.apply_theme()
         self.init_font()
 
-        # Update unit label when switching combo
-        self.unit_combo.currentIndexChanged.connect(
-            lambda i: self.unit_label.setText("semitones" if i == 0 else "tones")
-        )
+        self.unit_combo.currentIndexChanged.connect(self._unit_changed)
 
     # --- UI behavior ---
     def init_font(self) -> None:
@@ -452,7 +435,7 @@ class PitchShifterApp(QWidget):
         self.setStyleSheet(
             f"""
             QWidget {{
-                background: radial-gradient(circle at top left, #0b1120, {bg});
+                background-color: {bg};
                 color: {fg};
                 font-family: Segoe UI, Inter, Roboto, system-ui;
             }}
@@ -594,12 +577,37 @@ class PitchShifterApp(QWidget):
         """
         )
 
+    # --- slider/spin sync (block signals so fractional values survive) ---
+    def _slider_moved(self, v: int) -> None:
+        self.shift_spin.blockSignals(True)
+        self.shift_spin.setValue(float(v))
+        self.shift_spin.blockSignals(False)
+
+    def _spin_changed(self, v: float) -> None:
+        self.shift_slider.blockSignals(True)
+        self.shift_slider.setValue(int(round(v)))
+        self.shift_slider.blockSignals(False)
+
+    def _unit_changed(self, index: int) -> None:
+        """Keep the effective shift within ±MAX_SHIFT_SEMITONES in both units."""
+        if index == 0:
+            limit = MAX_SHIFT_SEMITONES
+            self.unit_label.setText("semitones")
+        else:
+            limit = MAX_SHIFT_SEMITONES // 2
+            self.unit_label.setText("tones")
+        self.shift_slider.setRange(-limit, limit)
+        self.shift_spin.setRange(-float(limit), float(limit))
+
     # --- drag & drop ---
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
-        if event.mimeData().hasUrls():
-            event.acceptProposedAction()
-        else:
-            super().dragEnterEvent(event)
+        urls = event.mimeData().urls()
+        if urls:
+            ext = os.path.splitext(urls[0].toLocalFile())[1].lower()
+            if ext in (SUPPORTED_AUDIO_EXTS | SUPPORTED_VIDEO_EXTS):
+                event.acceptProposedAction()
+                return
+        super().dragEnterEvent(event)
 
     def dropEvent(self, event: QDropEvent) -> None:  # type: ignore[override]
         urls = event.mimeData().urls()
@@ -612,8 +620,9 @@ class PitchShifterApp(QWidget):
         filt = (
             "Media Files (*.wav *.mp3 *.ogg *.flac *.m4a *.aac *.mp4 *.mov *.mkv)"
         )
+        start_dir = os.path.dirname(self.in_path) if self.in_path else os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(
-            self, "Choose media file", os.getcwd(), filt
+            self, "Choose media file", start_dir, filt
         )
         if path:
             self.set_input_file(path)
@@ -631,6 +640,7 @@ class PitchShifterApp(QWidget):
         self.status_label.setText(
             "File loaded. Adjust pitch settings and click Export…"
         )
+        self.progress.setValue(0)
         self.btn_export.setEnabled(True)
 
     def export_file(self) -> None:
@@ -679,18 +689,32 @@ class PitchShifterApp(QWidget):
         return f"{stem}_pitch{sign}{amt:g}{unit}{default_suffix}"
 
     def run_job(self, cfg: JobConfig) -> None:
-        if self.thread and self.thread.isRunning():
+        if self.worker and self.worker.isRunning():
             QMessageBox.information(
                 self, "Busy", "Please wait for the current job to finish."
             )
             return
         self.progress.setValue(0)
         self.status_label.setText("Processing… please wait.")
-        self.thread = ProcessorThread(cfg)
-        self.thread.progressed.connect(self.on_progress)
-        self.thread.finished_ok.connect(self.on_done)
-        self.thread.failed.connect(self.on_fail)
-        self.thread.start()
+        self._set_busy(True)
+        self.worker = ProcessorThread(cfg)
+        self.worker.progressed.connect(self.on_progress)
+        self.worker.finished_ok.connect(self.on_done)
+        self.worker.failed.connect(self.on_fail)
+        self.worker.start()
+
+    def _set_busy(self, busy: bool) -> None:
+        self.btn_export.setEnabled(not busy and self.in_path is not None)
+        self.btn_open.setEnabled(not busy)
+
+    def closeEvent(self, event) -> None:  # type: ignore[override]
+        if self.worker and self.worker.isRunning():
+            QMessageBox.information(
+                self, "Busy", "Please wait for the current job to finish before closing."
+            )
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     @Slot(int)
     def on_progress(self, v: int) -> None:
@@ -699,6 +723,7 @@ class PitchShifterApp(QWidget):
     @Slot(str)
     def on_done(self, out_path: str) -> None:
         self.progress.setValue(100)
+        self._set_busy(False)
         base = os.path.basename(out_path)
         self.status_label.setText(f"Done. Exported to: {base}")
         QMessageBox.information(self, "Done", f"Exported to:\n{out_path}")
@@ -706,32 +731,43 @@ class PitchShifterApp(QWidget):
     @Slot(str)
     def on_fail(self, msg: str) -> None:
         self.progress.setValue(0)
+        self._set_busy(False)
         self.status_label.setText("Failed. Check the error message.")
         QMessageBox.critical(self, "Failed", msg)
+
+
+def resource_path(*parts: str) -> str:
+    """Path to a bundled resource, working both frozen and from source."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, *parts)
 
 
 def main() -> None:
     app = QApplication(sys.argv)
 
-
-    # Apply dark theme
-    from PySide6.QtGui import QPalette, QColor
+    # Apply dark palette so native dialogs match the theme
     palette = QPalette()
-    palette.setColor(QPalette.Window, QColor("#020617"))  # Deep navy background
-    palette.setColor(QPalette.WindowText, "#e5f4ff")     # Light text
-    palette.setColor(QPalette.Base, "#020617")           # Dark base
-    palette.setColor(QPalette.AlternateBase, "#020617")  # Dark alternate base
-    palette.setColor(QPalette.Text, "#e5f4ff")           # Light text
-    palette.setColor(QPalette.Button, "#020617")         # Dark button
-    palette.setColor(QPalette.ButtonText, "#e5f4ff")     # Light button text
-    palette.setColor(QPalette.Highlight, "#38bdf8")      # Accent color
-    palette.setColor(QPalette.HighlightedText, "#020617")# Dark text on accent
+    palette.setColor(QPalette.Window, QColor("#020617"))
+    palette.setColor(QPalette.WindowText, QColor("#e5f4ff"))
+    palette.setColor(QPalette.Base, QColor("#020617"))
+    palette.setColor(QPalette.AlternateBase, QColor("#020617"))
+    palette.setColor(QPalette.Text, QColor("#e5f4ff"))
+    palette.setColor(QPalette.Button, QColor("#020617"))
+    palette.setColor(QPalette.ButtonText, QColor("#e5f4ff"))
+    palette.setColor(QPalette.Highlight, QColor("#38bdf8"))
+    palette.setColor(QPalette.HighlightedText, QColor("#020617"))
     app.setPalette(palette)
 
-    # set style to ensure consistent rendering
+    # Fusion style ensures consistent rendering across platforms
     app.setStyle("Fusion")
 
-    # Create and show the main application window
+    icon_path = resource_path("icons", "icon.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
+
     w = PitchShifterApp()
     w.show()
     sys.exit(app.exec())
