@@ -29,12 +29,13 @@ import librosa
 import soundfile as sf
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QPalette
+from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QMouseEvent, QPalette
 from PySide6.QtWidgets import (
     QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
+    QGridLayout,
     QPushButton,
     QLabel,
     QFileDialog,
@@ -239,12 +240,441 @@ class ProcessorThread(QThread):
             self.progressed.emit(95)
 
 
-class NeonFrame(QFrame):
+def resource_path(*parts: str) -> str:
+    """Path to a bundled resource, working both frozen and from source."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, *parts)
+
+
+def _asset_url(name: str) -> str:
+    """Forward-slash path for use inside the Qt stylesheet."""
+    return resource_path("assets", name).replace("\\", "/")
+
+
+_ARROW_DOWN = _asset_url("arrow-down.svg")
+_ARROW_UP = _asset_url("arrow-up.svg")
+
+
+# ---------------------------------------------------------------------------
+# Theme
+#
+# The look is locked to this dark palette no matter what theme the OS uses:
+#  - Fusion style (ignores platform theme engines)
+#  - a complete QPalette, including Disabled roles
+#  - an application-wide stylesheet (also covers QMessageBox and popups)
+#  - the Qt color scheme is forced to Dark where supported (title bar)
+# ---------------------------------------------------------------------------
+
+C_BG = "#0a0f1e"          # window background
+C_CARD = "#0f172a"        # card / input background
+C_CARD_2 = "#111c33"      # slightly lighter card
+C_BORDER = "#24324d"      # subtle borders
+C_TEXT = "#e8f2ff"        # main text
+C_SUB = "#8aa3c4"         # secondary text
+C_MUTED = "#5b7294"       # muted text
+C_ACCENT = "#38bdf8"      # cyan
+C_ACCENT_2 = "#a855f7"    # purple
+C_DISABLED = "#64748b"
+
+STYLESHEET = f"""
+QWidget {{
+    background-color: {C_BG};
+    color: {C_TEXT};
+    font-family: "Segoe UI", "Inter", "Roboto", sans-serif;
+    font-size: 14px;
+}}
+#title {{
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: {C_TEXT};
+    background: transparent;
+}}
+#titleAccent {{
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: 1px;
+    color: {C_ACCENT};
+    background: transparent;
+}}
+#subtitle {{
+    font-size: 13px;
+    color: {C_SUB};
+    background: transparent;
+}}
+#topRightTag {{
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    color: {C_MUTED};
+    background: transparent;
+}}
+#topRightHint {{
+    font-size: 11px;
+    color: {C_MUTED};
+    background: transparent;
+}}
+
+/* --- drop zone ------------------------------------------------------- */
+#dropZone {{
+    border: 2px dashed {C_BORDER};
+    border-radius: 16px;
+    background-color: {C_CARD};
+}}
+#dropZone:hover {{
+    border-color: {C_ACCENT};
+    background-color: {C_CARD_2};
+}}
+#dropZone[dragOver="true"] {{
+    border: 2px dashed {C_ACCENT};
+    background-color: rgba(56, 189, 248, 0.10);
+}}
+#dropZone[loaded="true"] {{
+    border: 2px solid {C_BORDER};
+}}
+#dropIcon {{
+    font-size: 30px;
+    background: transparent;
+}}
+#dropTitle {{
+    font-size: 15px;
+    font-weight: 600;
+    color: {C_TEXT};
+    background: transparent;
+}}
+#dropHint {{
+    font-size: 12px;
+    color: {C_MUTED};
+    background: transparent;
+}}
+
+/* --- control card ----------------------------------------------------- */
+QFrame[class="card"] {{
+    border: 1px solid {C_BORDER};
+    border-radius: 16px;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 {C_CARD_2},
+        stop:1 {C_CARD}
+    );
+}}
+#sectionLabel {{
+    font-weight: 600;
+    font-size: 13px;
+    color: {C_SUB};
+    background: transparent;
+}}
+#unitSuffix {{
+    color: {C_MUTED};
+    font-size: 13px;
+    background: transparent;
+}}
+#statusLabel {{
+    font-size: 12px;
+    color: {C_SUB};
+    background: transparent;
+}}
+#divider {{
+    background-color: {C_BORDER};
+    max-height: 1px;
+    border: none;
+}}
+
+/* --- buttons ----------------------------------------------------------- */
+QPushButton {{
+    background-color: {C_CARD_2};
+    border: 1px solid {C_BORDER};
+    border-radius: 10px;
+    padding: 9px 20px;
+    font-weight: 600;
+    color: {C_TEXT};
+}}
+QPushButton:hover {{
+    border-color: {C_ACCENT};
+    background-color: #16233f;
+}}
+QPushButton:pressed {{
+    background-color: {C_CARD};
+}}
+QPushButton:disabled {{
+    color: {C_DISABLED};
+    border-color: {C_BORDER};
+    background-color: {C_CARD};
+}}
+QPushButton#primaryButton {{
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 {C_ACCENT}, stop:1 {C_ACCENT_2}
+    );
+    border: none;
+    color: #06121f;
+    font-weight: 700;
+    padding: 10px 26px;
+}}
+QPushButton#primaryButton:hover {{
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #5ecbfa, stop:1 #bb75f9
+    );
+}}
+QPushButton#primaryButton:pressed {{
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #2da8e0, stop:1 #9445dd
+    );
+}}
+QPushButton#primaryButton:disabled {{
+    background: {C_CARD_2};
+    color: {C_DISABLED};
+    border: 1px solid {C_BORDER};
+}}
+
+/* --- inputs ------------------------------------------------------------ */
+QComboBox, QDoubleSpinBox {{
+    background-color: {C_CARD};
+    border: 1px solid {C_BORDER};
+    border-radius: 10px;
+    padding: 6px 12px;
+    min-height: 30px;
+    selection-background-color: rgba(56, 189, 248, 0.35);
+    selection-color: {C_TEXT};
+}}
+QComboBox:hover, QDoubleSpinBox:hover {{
+    border-color: {C_ACCENT};
+}}
+QComboBox:disabled, QDoubleSpinBox:disabled {{
+    color: {C_DISABLED};
+}}
+QComboBox::drop-down {{
+    border: none;
+    width: 26px;
+}}
+QComboBox::down-arrow {{
+    image: url("{_ARROW_DOWN}");
+    width: 12px;
+    height: 12px;
+    margin-right: 8px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {C_CARD_2};
+    border: 1px solid {C_BORDER};
+    border-radius: 8px;
+    padding: 4px;
+    outline: none;
+    selection-background-color: rgba(56, 189, 248, 0.25);
+    selection-color: {C_TEXT};
+}}
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    background: transparent;
+    border: none;
+    width: 20px;
+}}
+QDoubleSpinBox::up-arrow {{
+    image: url("{_ARROW_UP}");
+    width: 10px;
+    height: 10px;
+}}
+QDoubleSpinBox::down-arrow {{
+    image: url("{_ARROW_DOWN}");
+    width: 10px;
+    height: 10px;
+}}
+
+/* --- slider ------------------------------------------------------------ */
+QSlider::groove:horizontal {{
+    height: 6px;
+    background: {C_BORDER};
+    border-radius: 3px;
+    margin: 0 2px;
+}}
+QSlider::handle:horizontal {{
+    width: 20px;
+    height: 20px;
+    margin: -7px 0;
+    background: qradialgradient(
+        cx:0.4, cy:0.4, radius: 0.9,
+        fx:0.4, fy:0.4,
+        stop:0 #e8f2ff, stop:0.35 {C_ACCENT}, stop:1 {C_ACCENT_2}
+    );
+    border: 2px solid {C_BG};
+    border-radius: 10px;
+}}
+QSlider::handle:horizontal:hover {{
+    background: qradialgradient(
+        cx:0.4, cy:0.4, radius: 0.9,
+        fx:0.4, fy:0.4,
+        stop:0 #ffffff, stop:0.35 #5ecbfa, stop:1 #bb75f9
+    );
+}}
+QSlider::sub-page:horizontal {{
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 {C_ACCENT}, stop:1 {C_ACCENT_2}
+    );
+    border-radius: 3px;
+}}
+
+/* --- progress ----------------------------------------------------------- */
+QProgressBar {{
+    background-color: {C_CARD};
+    border: 1px solid {C_BORDER};
+    border-radius: 9px;
+    height: 18px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: {C_TEXT};
+}}
+QProgressBar::chunk {{
+    border-radius: 8px;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 {C_ACCENT}, stop:1 {C_ACCENT_2}
+    );
+}}
+
+/* --- dialogs / misc ------------------------------------------------------ */
+QMessageBox {{
+    background-color: {C_CARD_2};
+}}
+QMessageBox QLabel {{
+    background: transparent;
+    color: {C_TEXT};
+}}
+QToolTip {{
+    background-color: {C_CARD_2};
+    color: {C_TEXT};
+    border: 1px solid {C_ACCENT};
+    padding: 4px 8px;
+}}
+QScrollBar:vertical {{
+    background: {C_CARD};
+    width: 10px;
+    border-radius: 5px;
+}}
+QScrollBar::handle:vertical {{
+    background: {C_BORDER};
+    border-radius: 5px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: {C_MUTED};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+}}
+"""
+
+
+def make_dark_palette() -> QPalette:
+    """Complete fixed palette so no widget falls back to the OS theme."""
+    p = QPalette()
+    roles = {
+        QPalette.ColorRole.Window: C_BG,
+        QPalette.ColorRole.WindowText: C_TEXT,
+        QPalette.ColorRole.Base: C_CARD,
+        QPalette.ColorRole.AlternateBase: C_CARD_2,
+        QPalette.ColorRole.Text: C_TEXT,
+        QPalette.ColorRole.Button: C_CARD_2,
+        QPalette.ColorRole.ButtonText: C_TEXT,
+        QPalette.ColorRole.BrightText: "#ffffff",
+        QPalette.ColorRole.Highlight: C_ACCENT,
+        QPalette.ColorRole.HighlightedText: "#06121f",
+        QPalette.ColorRole.ToolTipBase: C_CARD_2,
+        QPalette.ColorRole.ToolTipText: C_TEXT,
+        QPalette.ColorRole.Link: C_ACCENT,
+        QPalette.ColorRole.LinkVisited: C_ACCENT_2,
+        QPalette.ColorRole.PlaceholderText: C_MUTED,
+    }
+    for role, color in roles.items():
+        p.setColor(role, QColor(color))
+    # Disabled group — keep it consistent instead of inheriting OS greys
+    for role in (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text,
+                 QPalette.ColorRole.ButtonText):
+        p.setColor(QPalette.ColorGroup.Disabled, role, QColor(C_DISABLED))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base, QColor(C_CARD))
+    p.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button, QColor(C_CARD))
+    return p
+
+
+def force_dark_title_bar(widget: QWidget) -> None:
+    """Keep the Windows title bar dark even when the OS uses a light theme."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        hwnd = int(widget.winId())
+        value = ctypes.c_int(1)
+        for attr in (20, 19):  # DWMWA_USE_IMMERSIVE_DARK_MODE (19 on older builds)
+            res = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
+            )
+            if res == 0:
+                break
+    except Exception:
+        pass
+
+
+class DropZone(QFrame):
+    """Clickable drop target that highlights while a file is dragged over."""
+
+    clicked = Signal()
+
     def __init__(self) -> None:
         super().__init__()
-        self.setFrameShape(QFrame.Shape.StyledPanel)
-        # Style using a Qt property so we can target it in the stylesheet
-        self.setProperty("class", "neon")
+        self.setObjectName("dropZone")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(110)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 18, 16, 18)
+        layout.setSpacing(4)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.icon_label = QLabel("🎧")
+        self.icon_label.setObjectName("dropIcon")
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.title_label = QLabel("Drop your audio or video file here")
+        self.title_label.setObjectName("dropTitle")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.hint_label = QLabel("or click to browse · wav mp3 ogg flac m4a aac · mp4 mov mkv")
+        self.hint_label.setObjectName("dropHint")
+        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(self.icon_label)
+        layout.addWidget(self.title_label)
+        layout.addWidget(self.hint_label)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # type: ignore[override]
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+    def set_drag_over(self, on: bool) -> None:
+        self.setProperty("dragOver", "true" if on else "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def set_loaded(self, filename: Optional[str]) -> None:
+        if filename:
+            self.icon_label.setText("🎵")
+            self.title_label.setText(filename)
+            self.hint_label.setText("Click to choose a different file")
+            self.setProperty("loaded", "true")
+        else:
+            self.icon_label.setText("🎧")
+            self.title_label.setText("Drop your audio or video file here")
+            self.hint_label.setText(
+                "or click to browse · wav mp3 ogg flac m4a aac · mp4 mov mkv"
+            )
+            self.setProperty("loaded", "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class PitchShifterApp(QWidget):
@@ -252,33 +682,40 @@ class PitchShifterApp(QWidget):
         super().__init__()
         self.setAcceptDrops(True)
         self.setWindowTitle("PitchShifter")
-        self.setMinimumSize(760, 520)
-        self.resize(960, 600)
+        self.setMinimumSize(720, 560)
+        self.resize(880, 620)
 
         self.in_path: Optional[str] = None
         self.worker: Optional[ProcessorThread] = None
+        self._unit_index = 0
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 24, 24, 24)
+        root.setContentsMargins(28, 24, 28, 24)
         root.setSpacing(18)
 
-        # Top bar: Title on left, small info on right
+        # --- header ---
         topbar = QHBoxLayout()
 
         titlebox = QVBoxLayout()
-        title = QLabel("PitchShifter")
-        title.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        title.setObjectName("title")
+        titlebox.setSpacing(2)
 
-        subtitle = QLabel("Drop audio/video, shift pitch, export")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(0)
+        title_a = QLabel("Pitch")
+        title_a.setObjectName("titleAccent")
+        title_b = QLabel("Shifter")
+        title_b.setObjectName("title")
+        title_row.addWidget(title_a)
+        title_row.addWidget(title_b)
+        title_row.addStretch(1)
+
+        subtitle = QLabel("Drop audio/video · shift pitch · export")
         subtitle.setObjectName("subtitle")
 
-        titlebox.addWidget(title)
+        titlebox.addLayout(title_row)
         titlebox.addWidget(subtitle)
         topbar.addLayout(titlebox, 1)
 
-        # Right info area (no controls, just futuristic tags)
         rightbox = QVBoxLayout()
         rightbox.setSpacing(2)
         rightbox.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -287,7 +724,7 @@ class PitchShifterApp(QWidget):
         tag.setObjectName("topRightTag")
         tag.setAlignment(Qt.AlignmentFlag.AlignRight)
 
-        hint = QLabel("Drag & drop enabled")
+        hint = QLabel("drag & drop enabled")
         hint.setObjectName("topRightHint")
         hint.setAlignment(Qt.AlignmentFlag.AlignRight)
 
@@ -295,47 +732,25 @@ class PitchShifterApp(QWidget):
         rightbox.addWidget(hint)
         topbar.addLayout(rightbox)
 
-        # File bar
-        file_bar = QHBoxLayout()
-        file_bar.setSpacing(12)
+        # --- drop zone ---
+        self.drop_zone = DropZone()
+        self.drop_zone.clicked.connect(self.choose_file)
 
-        self.file_label = QLabel("Drop a file here or click Open…")
-        self.file_label.setObjectName("fileLabel")
+        # --- control card ---
+        card = QFrame()
+        card.setProperty("class", "card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(22, 22, 22, 22)
+        card_layout.setSpacing(16)
 
-        self.btn_open = QPushButton("Open…")
-        self.btn_open.setObjectName("primaryButton")
-        self.btn_open.clicked.connect(self.choose_file)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(16)
+        grid.setVerticalSpacing(14)
+        grid.setColumnStretch(1, 1)
 
-        file_bar.addWidget(self.file_label, 1)
-        file_bar.addWidget(self.btn_open)
-
-        # Main control card
-        ctrl_frame = NeonFrame()
-        ctrl_layout = QVBoxLayout(ctrl_frame)
-        ctrl_layout.setContentsMargins(18, 18, 18, 18)
-        ctrl_layout.setSpacing(18)
-
-        # Unit row
-        unit_row = QHBoxLayout()
-        unit_row.setSpacing(12)
-
-        unit_caption = QLabel("Pitch units")
-        unit_caption.setObjectName("sectionLabel")
-        unit_row.addWidget(unit_caption)
-
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(["Semitones", "Tones (×2)"])
-        self.unit_combo.setMinimumWidth(160)
-        unit_row.addWidget(self.unit_combo)
-        unit_row.addStretch(1)
-
-        # Shift row
-        shift_row = QHBoxLayout()
-        shift_row.setSpacing(12)
-
+        # Row 0: shift amount
         shift_caption = QLabel("Shift amount")
         shift_caption.setObjectName("sectionLabel")
-        shift_row.addWidget(shift_caption)
 
         self.shift_slider = QSlider(Qt.Orientation.Horizontal)
         self.shift_slider.setRange(-MAX_SHIFT_SEMITONES, MAX_SHIFT_SEMITONES)
@@ -347,235 +762,106 @@ class PitchShifterApp(QWidget):
         self.shift_spin.setRange(-float(MAX_SHIFT_SEMITONES), float(MAX_SHIFT_SEMITONES))
         self.shift_spin.setDecimals(2)
         self.shift_spin.setSingleStep(0.1)
+        self.shift_spin.setFixedWidth(96)
+
+        self.unit_label = QLabel("semitones")
+        self.unit_label.setObjectName("unitSuffix")
 
         self.shift_slider.valueChanged.connect(self._slider_moved)
         self.shift_spin.valueChanged.connect(self._spin_changed)
 
-        shift_row.addWidget(self.shift_slider, 1)
-        shift_row.addWidget(self.shift_spin)
+        shift_box = QHBoxLayout()
+        shift_box.setSpacing(12)
+        shift_box.addWidget(self.shift_slider, 1)
+        shift_box.addWidget(self.shift_spin)
+        shift_box.addWidget(self.unit_label)
 
-        self.unit_label = QLabel("semitones")
-        self.unit_label.setObjectName("unitLabel")
-        shift_row.addWidget(self.unit_label)
+        grid.addWidget(shift_caption, 0, 0)
+        grid.addLayout(shift_box, 0, 1)
 
-        # Sample rate row
-        sr_row = QHBoxLayout()
-        sr_row.setSpacing(12)
+        # Row 1: units
+        unit_caption = QLabel("Pitch units")
+        unit_caption.setObjectName("sectionLabel")
 
+        self.unit_combo = QComboBox()
+        self.unit_combo.addItems(["Semitones", "Tones (1 tone = 2 semitones)"])
+        self.unit_combo.setMinimumWidth(220)
+
+        unit_box = QHBoxLayout()
+        unit_box.addWidget(self.unit_combo)
+        unit_box.addStretch(1)
+
+        grid.addWidget(unit_caption, 1, 0)
+        grid.addLayout(unit_box, 1, 1)
+
+        # Row 2: resample
         sr_caption = QLabel("Resample")
         sr_caption.setObjectName("sectionLabel")
-        sr_row.addWidget(sr_caption)
 
         self.sr_combo = QComboBox()
-        self.sr_combo.addItems(["Keep original", "44100", "48000", "96000"])
-        self.sr_combo.setMinimumWidth(160)
-        sr_row.addWidget(self.sr_combo)
-        sr_row.addStretch(1)
+        self.sr_combo.addItems(["Keep original", "44100 Hz", "48000 Hz", "96000 Hz"])
+        self.sr_combo.setMinimumWidth(220)
+
+        sr_box = QHBoxLayout()
+        sr_box.addWidget(self.sr_combo)
+        sr_box.addStretch(1)
+
+        grid.addWidget(sr_caption, 2, 0)
+        grid.addLayout(sr_box, 2, 1)
+
+        card_layout.addLayout(grid)
+
+        divider = QFrame()
+        divider.setObjectName("divider")
+        divider.setFrameShape(QFrame.Shape.HLine)
+        divider.setFixedHeight(1)
+        card_layout.addWidget(divider)
 
         # Progress + status
         self.progress = QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        self.progress.setFixedHeight(26)
+        self.progress.setFixedHeight(18)
 
-        self.status_label = QLabel("Ready. Drop a file or click Open…")
+        self.status_label = QLabel("Ready. Drop a file or click the box above.")
         self.status_label.setObjectName("statusLabel")
-        self.status_label.setAlignment(
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
-        )
 
-        # Export row
-        out_row = QHBoxLayout()
+        # Buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        self.btn_reset = QPushButton("Reset")
+        self.btn_reset.clicked.connect(self.reset_shift)
+
         self.btn_export = QPushButton("Export…")
         self.btn_export.setObjectName("primaryButton")
         self.btn_export.setEnabled(False)
         self.btn_export.clicked.connect(self.export_file)
-        out_row.addStretch(1)
-        out_row.addWidget(self.btn_export)
 
-        # Build control layout
-        ctrl_layout.addLayout(unit_row)
-        ctrl_layout.addLayout(shift_row)
-        ctrl_layout.addLayout(sr_row)
-        ctrl_layout.addWidget(self.progress)
-        ctrl_layout.addWidget(self.status_label)
-        ctrl_layout.addLayout(out_row)
+        btn_row.addWidget(self.status_label, 1)
+        btn_row.addWidget(self.btn_reset)
+        btn_row.addWidget(self.btn_export)
 
-        # Assemble root layout
+        card_layout.addWidget(self.progress)
+        card_layout.addLayout(btn_row)
+
+        # --- assemble ---
         root.addLayout(topbar)
-        root.addLayout(file_bar)
-        root.addWidget(ctrl_frame)
+        root.addWidget(self.drop_zone)
+        root.addWidget(card)
         root.addStretch(1)
 
-        # Fixed dark theme + base font
-        self.apply_theme()
         self.init_font()
-
         self.unit_combo.currentIndexChanged.connect(self._unit_changed)
 
     # --- UI behavior ---
     def init_font(self) -> None:
         """Set a slightly larger base font for readability."""
         f = self.font()
-        f.setPointSizeF(11.0)
+        f.setPointSizeF(10.5)
         app = QApplication.instance()
         if app is not None:
             app.setFont(f)
-
-    def apply_theme(self) -> None:
-        """Single dark futuristic theme."""
-        bg = "#020617"      # deep navy / near-black
-        fg = "#e5f4ff"
-        sub = "#7ea0c8"
-        accent1 = "#38bdf8"  # cyan-ish
-        accent2 = "#a855f7"  # purple
-        panel = "#020617"
-        border = "#1f2937"
-
-        self.setStyleSheet(
-            f"""
-            QWidget {{
-                background-color: {bg};
-                color: {fg};
-                font-family: Segoe UI, Inter, Roboto, system-ui;
-            }}
-            #title {{
-                font-size: 34px;
-                font-weight: 900;
-                letter-spacing: 1px;
-                color: {accent1};
-            }}
-            #subtitle {{
-                font-size: 14px;
-                color: {sub};
-                margin-top: 4px;
-                margin-bottom: 8px;
-            }}
-            #fileLabel {{
-                color: {sub};
-                font-size: 14px;
-            }}
-            #topRightTag {{
-                font-size: 11px;
-                color: {sub};
-                font-weight: 600;
-            }}
-            #topRightHint {{
-                font-size: 11px;
-                color: {sub};
-            }}
-            #sectionLabel {{
-                font-weight: 600;
-                font-size: 14px;
-            }}
-            #unitLabel {{
-                color: {sub};
-                min-width: 70px;
-            }}
-            #statusLabel {{
-                font-size: 12px;
-                color: {sub};
-                margin-top: 4px;
-            }}
-            QFrame[class="neon"] {{
-                border: 1px solid rgba(148,163,184,0.35);
-                border-radius: 18px;
-                padding: 18px;
-                background: qradialgradient(
-                    cx:0.2, cy:0.0, radius: 1.4,
-                    fx:0.1, fy:0.0,
-                    stop:0 rgba(56,189,248,0.16),
-                    stop:0.4 rgba(15,23,42,0.96),
-                    stop:1 {panel}
-                );
-            }}
-            QProgressBar {{
-                background: rgba(15,23,42,0.7);
-                border: 1px solid {border};
-                border-radius: 12px;
-                height: 26px;
-                text-align: center;
-            }}
-            QProgressBar::chunk {{
-                border-radius: 12px;
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {accent1}, stop:1 {accent2}
-                );
-            }}
-            QPushButton {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 rgba(56,189,248,0.12),
-                    stop:1 rgba(168,85,247,0.16)
-                );
-                border: 1px solid rgba(148,163,184,0.55);
-                border-radius: 14px;
-                padding: 10px 18px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                border-color: {accent1};
-            }}
-            QPushButton#primaryButton {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {accent1},
-                    stop:1 {accent2}
-                );
-                color: white;
-            }}
-            QPushButton#primaryButton:disabled {{
-                background: rgba(30,41,59,0.9);
-                color: rgba(148,163,184,0.7);
-                border-color: {border};
-            }}
-            QComboBox, QDoubleSpinBox {{
-                background: rgba(15,23,42,0.9);
-                border: 1px solid rgba(148,163,184,0.4);
-                border-radius: 10px;
-                padding: 6px 10px;
-                min-height: 30px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 18px;
-            }}
-            QComboBox::down-arrow {{
-                width: 10px;
-                height: 10px;
-            }}
-            QSlider::groove:horizontal {{
-                height: 8px;
-                background: rgba(30,64,175,0.8);
-                border-radius: 4px;
-                margin: 0 4px;
-            }}
-            QSlider::handle:horizontal {{
-                width: 22px;
-                height: 22px;
-                margin: -7px 0;
-                background: qradialgradient(
-                    cx:0.3, cy:0.3, radius: 0.8,
-                    fx:0.3, fy:0.3,
-                    stop:0 {accent2},
-                    stop:1 {accent1}
-                );
-                border: 1px solid {accent1};
-                border-radius: 11px;
-            }}
-            QSlider::sub-page:horizontal {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 {accent1}, stop:1 {accent2}
-                );
-                border-radius: 4px;
-            }}
-            QLabel {{
-                font-size: 14px;
-            }}
-        """
-        )
 
     # --- slider/spin sync (block signals so fractional values survive) ---
     def _slider_moved(self, v: int) -> None:
@@ -589,15 +875,31 @@ class PitchShifterApp(QWidget):
         self.shift_slider.blockSignals(False)
 
     def _unit_changed(self, index: int) -> None:
-        """Keep the effective shift within ±MAX_SHIFT_SEMITONES in both units."""
+        """Convert the current value and keep ±MAX_SHIFT_SEMITONES effective."""
+        value = self.shift_spin.value()
+        if index == self._unit_index:
+            return
         if index == 0:
             limit = MAX_SHIFT_SEMITONES
+            value *= 2.0  # tones -> semitones
             self.unit_label.setText("semitones")
         else:
             limit = MAX_SHIFT_SEMITONES // 2
+            value /= 2.0  # semitones -> tones
             self.unit_label.setText("tones")
+        self._unit_index = index
+
+        self.shift_slider.blockSignals(True)
+        self.shift_spin.blockSignals(True)
         self.shift_slider.setRange(-limit, limit)
         self.shift_spin.setRange(-float(limit), float(limit))
+        self.shift_spin.setValue(value)
+        self.shift_slider.setValue(int(round(value)))
+        self.shift_spin.blockSignals(False)
+        self.shift_slider.blockSignals(False)
+
+    def reset_shift(self) -> None:
+        self.shift_spin.setValue(0.0)
 
     # --- drag & drop ---
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
@@ -605,11 +907,17 @@ class PitchShifterApp(QWidget):
         if urls:
             ext = os.path.splitext(urls[0].toLocalFile())[1].lower()
             if ext in (SUPPORTED_AUDIO_EXTS | SUPPORTED_VIDEO_EXTS):
+                self.drop_zone.set_drag_over(True)
                 event.acceptProposedAction()
                 return
         super().dragEnterEvent(event)
 
+    def dragLeaveEvent(self, event) -> None:  # type: ignore[override]
+        self.drop_zone.set_drag_over(False)
+        super().dragLeaveEvent(event)
+
     def dropEvent(self, event: QDropEvent) -> None:  # type: ignore[override]
+        self.drop_zone.set_drag_over(False)
         urls = event.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
@@ -635,11 +943,8 @@ class PitchShifterApp(QWidget):
             )
             return
         self.in_path = path
-        base = os.path.basename(path)
-        self.file_label.setText(f"Loaded: {base}")
-        self.status_label.setText(
-            "File loaded. Adjust pitch settings and click Export…"
-        )
+        self.drop_zone.set_loaded(os.path.basename(path))
+        self.status_label.setText("File loaded. Adjust pitch and click Export…")
         self.progress.setValue(0)
         self.btn_export.setEnabled(True)
 
@@ -669,8 +974,8 @@ class PitchShifterApp(QWidget):
             # Tones → semitones
             semis *= 2.0
 
-        sr_choice = self.sr_combo.currentText()
-        sr = None if sr_choice == "Keep original" else int(sr_choice)
+        sr_text = self.sr_combo.currentText()
+        sr = None if sr_text == "Keep original" else int(sr_text.split()[0])
 
         cfg = JobConfig(
             in_path=self.in_path,
@@ -705,7 +1010,8 @@ class PitchShifterApp(QWidget):
 
     def _set_busy(self, busy: bool) -> None:
         self.btn_export.setEnabled(not busy and self.in_path is not None)
-        self.btn_open.setEnabled(not busy)
+        self.btn_reset.setEnabled(not busy)
+        self.drop_zone.setEnabled(not busy)
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
         if self.worker and self.worker.isRunning():
@@ -736,33 +1042,23 @@ class PitchShifterApp(QWidget):
         QMessageBox.critical(self, "Failed", msg)
 
 
-def resource_path(*parts: str) -> str:
-    """Path to a bundled resource, working both frozen and from source."""
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        base = sys._MEIPASS
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, *parts)
-
-
 def main() -> None:
     app = QApplication(sys.argv)
 
-    # Apply dark palette so native dialogs match the theme
-    palette = QPalette()
-    palette.setColor(QPalette.Window, QColor("#020617"))
-    palette.setColor(QPalette.WindowText, QColor("#e5f4ff"))
-    palette.setColor(QPalette.Base, QColor("#020617"))
-    palette.setColor(QPalette.AlternateBase, QColor("#020617"))
-    palette.setColor(QPalette.Text, QColor("#e5f4ff"))
-    palette.setColor(QPalette.Button, QColor("#020617"))
-    palette.setColor(QPalette.ButtonText, QColor("#e5f4ff"))
-    palette.setColor(QPalette.Highlight, QColor("#38bdf8"))
-    palette.setColor(QPalette.HighlightedText, QColor("#020617"))
-    app.setPalette(palette)
-
-    # Fusion style ensures consistent rendering across platforms
+    # Lock the look: Fusion style ignores the platform theme engine, and the
+    # fixed palette + app-wide stylesheet keep every widget (including
+    # dialogs and popups) on our dark theme regardless of the OS theme.
     app.setStyle("Fusion")
+    app.setPalette(make_dark_palette())
+    app.setStyleSheet(STYLESHEET)
+
+    # Qt 6.8+: force the dark color scheme (also darkens window frames)
+    hints = app.styleHints()
+    if hasattr(hints, "setColorScheme") and hasattr(Qt, "ColorScheme"):
+        try:
+            hints.setColorScheme(Qt.ColorScheme.Dark)
+        except Exception:
+            pass
 
     icon_path = resource_path("icons", "icon.png")
     if os.path.exists(icon_path):
@@ -770,6 +1066,7 @@ def main() -> None:
 
     w = PitchShifterApp()
     w.show()
+    force_dark_title_bar(w)
     sys.exit(app.exec())
 
 

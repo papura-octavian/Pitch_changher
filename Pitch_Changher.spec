@@ -11,6 +11,9 @@ datas = []
 icon_png = os.path.join(base_dir, "icons", "icon.png")
 if os.path.exists(icon_png):
     datas.append((icon_png, "icons"))
+assets_dir = os.path.join(base_dir, "assets")
+if os.path.exists(assets_dir):
+    datas.append((assets_dir, "assets"))
 
 a = Analysis(
     ['Pitch_Changher.py'],
