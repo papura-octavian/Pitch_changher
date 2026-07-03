@@ -32,12 +32,12 @@ PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting o
 
 ### 🚀 Quick Install (Recommended)
 
-Download the pre-built installer for your operating system from the [Releases](https://github.com/papura-octavian/Pitch_changher/releases) page:
+Download the pre-built Windows installer from the [Releases](https://github.com/papura-octavian/Pitch_changher/releases) page:
 
 - **Windows**: Download `PitchShifter-Setup-*.exe` and run it.
-- **Linux**: Download `PitchShifter-*-x86_64.AppImage`, make it executable (`chmod +x PitchShifter-*.AppImage`), and run it.
+- **Linux**: build from source (see below) or run `./build_appimage.sh` to create an AppImage locally.
 
-FFmpeg is bundled with the installers — no separate installation needed.
+FFmpeg is bundled with the installer — no separate installation needed.
 
 ---
 
@@ -93,14 +93,14 @@ See [BUILD.md](BUILD.md) for full instructions.
 
 ### Automated Builds (GitHub Actions)
 
-Installers are built automatically when you push a version tag:
+The Windows installer is built automatically when you push a version tag:
 
 ```bash
-git tag v1.1.0
-git push origin v1.1.0
+git tag v1.2.1
+git push origin v1.2.1
 ```
 
-The **Build Installers** workflow builds the Windows installer and the Linux AppImage and attaches both to the GitHub Release for that tag. You can also trigger it manually from the **Actions** tab (artifacts only, no release).
+The **Build Installers** workflow builds the Windows installer and attaches it to the GitHub Release for that tag. You can also trigger it manually from the **Actions** tab (artifact only, no release).
 
 ---
 

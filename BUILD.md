@@ -52,17 +52,18 @@ The scripts copy `ffmpeg/` next to the executable so it runs standalone.
 ## Automated Builds with GitHub Actions
 
 The **Build Installers** workflow (`.github/workflows/build.yml`) runs on
-every `v*` tag and on manual dispatch:
+every `v*` tag and on manual dispatch. It builds the **Windows installer
+only** (Linux users can build an AppImage locally with `build_appimage.sh`):
 
 1. Create and push a tag:
    ```bash
-   git tag v1.1.0
-   git push origin v1.1.0
+   git tag v1.2.1
+   git push origin v1.2.1
    ```
-2. The workflow builds the Windows installer and the Linux AppImage in
-   parallel and attaches both to the GitHub Release for that tag.
+2. The workflow builds the Windows installer and attaches it to the GitHub
+   Release for that tag.
 3. For manual runs (Actions → Build Installers → Run workflow), the
-   installers are available as workflow artifacts instead.
+   installer is available as a workflow artifact instead.
 
 ## FFmpeg lookup order (at runtime)
 
