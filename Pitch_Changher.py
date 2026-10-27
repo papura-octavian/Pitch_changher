@@ -3,6 +3,8 @@ PitchShifter — Windows and Linux
 
 - Load MP3/WAV/OGG/FLAC/M4A/AAC or MP4/MOV/MKV
 - Shift pitch by semitones (±24) or tones (±12)
+- Raise/lower volume in dB or auto-normalize loudness, with a peak limiter
+  so boosted audio never clips
 - Export WAV/MP3 (audio) or MP4 (video remux with shifted audio)
 
 Install in venv:
@@ -27,11 +29,14 @@ from typing import Optional
 import numpy as np
 import librosa
 import soundfile as sf
+from scipy.ndimage import minimum_filter1d, uniform_filter1d
+from scipy.signal import lfilter, resample_poly
 
 from PySide6.QtCore import Qt, QThread, Signal, Slot
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent, QIcon, QMouseEvent, QPalette
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -54,6 +59,14 @@ SUPPORTED_VIDEO_EXTS = {".mp4", ".mov", ".mkv"}
 _DIRECT_DECODE_EXTS = {".wav", ".flac", ".ogg"}
 
 MAX_SHIFT_SEMITONES = 24
+
+MIN_GAIN_DB = -12
+MAX_GAIN_DB = 24
+# Auto-normalize target, same loudness streaming services aim for
+TARGET_LOUDNESS_LUFS = -14.0
+# Peak ceiling after a volume change; the 1 dB margin keeps MP3/AAC
+# encoding from pushing peaks over full scale
+LIMITER_CEILING_DB = -1.0
 
 _ffmpeg_path: Optional[str] = None
 
@@ -109,12 +122,152 @@ def run_ffmpeg(args: list[str], action: str) -> None:
         )
 
 
+def _db_to_amp(db: float) -> float:
+    return float(10.0 ** (db / 20.0))
+
+
+def _k_weighting(sr: int) -> list[tuple[np.ndarray, np.ndarray]]:
+    """BS.1770 K-weighting (high shelf + high pass) for any sample rate."""
+    # High shelf modelling the acoustic effect of the head
+    k = np.tan(np.pi * 1681.974450955533 / sr)
+    q = 0.7071752369554196
+    vh = 10.0 ** (3.999843853973347 / 20.0)
+    vb = vh ** 0.4996667741545416
+    a0 = 1.0 + k / q + k * k
+    shelf = (
+        np.array([vh + vb * k / q + k * k, 2.0 * (k * k - vh),
+                  vh - vb * k / q + k * k]) / a0,
+        np.array([1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0]),
+    )
+    # RLB high pass
+    k = np.tan(np.pi * 38.13547087602444 / sr)
+    q = 0.5003270373238773
+    a0 = 1.0 + k / q + k * k
+    highpass = (
+        np.array([1.0, -2.0, 1.0]),
+        np.array([1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0]),
+    )
+    return [shelf, highpass]
+
+
+def integrated_loudness(y: np.ndarray, sr: int) -> float:
+    """Integrated loudness (LUFS, ITU-R BS.1770) of a (channels, samples) signal.
+
+    Returns -inf for silence.
+    """
+    z = np.asarray(y, dtype=np.float64)
+    for b, a in _k_weighting(sr):
+        z = lfilter(b, a, z, axis=1)
+    power = np.sum(z * z, axis=0)  # all channels weighted 1.0 (mono/stereo)
+
+    # 400 ms blocks with 75% overlap, via a running sum of the power
+    step = max(1, int(round(0.1 * sr)))
+    block = 4 * step
+    if power.size < block:
+        energies = np.array([power.mean()]) if power.size else np.zeros(0)
+    else:
+        csum = np.concatenate(([0.0], np.cumsum(power)))
+        starts = np.arange(0, power.size - block + 1, step)
+        energies = (csum[starts + block] - csum[starts]) / block
+
+    def to_lufs(e: np.ndarray | float) -> np.ndarray | float:
+        return -0.691 + 10.0 * np.log10(np.maximum(e, 1e-20))
+
+    # Absolute gate at -70 LUFS, then relative gate 10 LU below the gated mean
+    energies = energies[to_lufs(energies) > -70.0]
+    if energies.size == 0:
+        return float("-inf")
+    rel_gate = to_lufs(energies.mean()) - 10.0
+    energies = energies[to_lufs(energies) > rel_gate]
+    return float(to_lufs(energies.mean()))
+
+
+def true_peak_envelope(y: np.ndarray, chunk: int = 1 << 18) -> np.ndarray:
+    """Per-sample true peak across all channels.
+
+    The waveform between samples can swing higher than the samples
+    themselves, so peaks are measured on a 4x oversampled copy, built in
+    chunks to keep memory low on long files.
+    """
+    n = y.shape[1]
+    env = np.max(np.abs(y), axis=0).astype(np.float64)
+    pad = 32  # longer than the resampling filter, so chunk edges are exact
+    for start in range(0, n, chunk):
+        lo, hi = max(0, start - pad), min(n, start + chunk + pad)
+        up = np.abs(resample_poly(y[:, lo:hi], 4, 1, axis=1))
+        up = up.max(axis=0).reshape(-1, 4).max(axis=1)
+        seg = env[start:start + chunk]
+        np.maximum(seg, up[start - lo:start - lo + seg.size], out=seg)
+    return env
+
+
+def limit_peaks(
+    y: np.ndarray, sr: int, peak: Optional[np.ndarray] = None,
+    ceiling_db: float = LIMITER_CEILING_DB,
+) -> np.ndarray:
+    """Look-ahead true-peak limiter: keeps peaks <= ceiling without hard clipping.
+
+    `peak` is y's true_peak_envelope, if already known. The gain needed at
+    each sample is spread with a minimum filter and then smoothed with a
+    moving average of the same width, so the gain ramps down before a peak
+    and back up after it instead of flattening the wave.
+    """
+    ceiling = _db_to_amp(ceiling_db)
+    if y.shape[1] == 0:
+        return y
+    if peak is None:
+        peak = true_peak_envelope(y)
+    if peak.max() <= ceiling:
+        return y
+    needed = np.minimum(1.0, ceiling / np.maximum(peak, 1e-12))
+    # ±15 ms: wide enough that the gain stays steady across one cycle of
+    # low bass, so the limiter doesn't modulate (distort) the waveform
+    width = 2 * max(1, int(sr * 0.015)) + 1
+    gain = minimum_filter1d(needed, size=width, mode="nearest")
+    gain = uniform_filter1d(gain, size=width, mode="nearest")
+    # The averaged gain is already <= needed everywhere; clip only guards
+    # against floating point rounding
+    return np.clip(y * gain, -ceiling, ceiling)
+
+
+def apply_volume(y: np.ndarray, sr: int, gain_db: float, normalize: bool) -> tuple[np.ndarray, float]:
+    """Apply a dB gain (or loudness normalization) followed by the limiter.
+
+    Returns the processed signal and the gain that was applied, in dB.
+    """
+    # The envelope scales with the gain, so it is measured only once
+    peak = true_peak_envelope(y)
+
+    def amplify(db: float) -> np.ndarray:
+        amp = _db_to_amp(db)
+        return limit_peaks(y * amp, sr, peak * amp)
+
+    if not normalize:
+        return amplify(gain_db), gain_db
+
+    loudness = integrated_loudness(y, sr)
+    if not np.isfinite(loudness):
+        return y, 0.0  # silence: nothing to normalize
+    gain_db = float(np.clip(TARGET_LOUDNESS_LUFS - loudness, -MAX_GAIN_DB, MAX_GAIN_DB))
+    # Limiting heavy peaks lowers the loudness a bit; top it back up
+    out = amplify(gain_db)
+    for _ in range(2):
+        shortfall = TARGET_LOUDNESS_LUFS - integrated_loudness(out, sr)
+        if shortfall < 0.3 or gain_db >= MAX_GAIN_DB:
+            break
+        gain_db = min(gain_db + shortfall, MAX_GAIN_DB)
+        out = amplify(gain_db)
+    return out, gain_db
+
+
 @dataclass
 class JobConfig:
     in_path: str
     out_path: str
     semitone_shift: float
     sr: Optional[int] = None
+    gain_db: float = 0.0
+    normalize: bool = False
 
 
 class ProcessorThread(QThread):
@@ -125,6 +278,7 @@ class ProcessorThread(QThread):
     def __init__(self, cfg: JobConfig):
         super().__init__()
         self.cfg = cfg
+        self.applied_gain_db: Optional[float] = None
 
     def run(self) -> None:  # type: ignore[override]
         try:
@@ -171,17 +325,22 @@ class ProcessorThread(QThread):
         y, sr = self._load_audio(in_audio_path)
         self.progressed.emit(30)
 
-        # Pad very short signals so the STFT inside pitch_shift has enough
-        # samples, then trim back to the original length
-        n = y.shape[1]
-        if n < 2048:
-            y = np.pad(y, ((0, 0), (0, 2048 - n)))
+        if self.cfg.semitone_shift != 0:
+            # Pad very short signals so the STFT inside pitch_shift has enough
+            # samples, then trim back to the original length
+            n = y.shape[1]
+            if n < 2048:
+                y = np.pad(y, ((0, 0), (0, 2048 - n)))
+            y = librosa.effects.pitch_shift(
+                y, sr=sr, n_steps=self.cfg.semitone_shift
+            )[:, :n]
+        self.progressed.emit(55)
 
-        shifted = librosa.effects.pitch_shift(
-            y, sr=sr, n_steps=self.cfg.semitone_shift
-        )
-        shifted = shifted[:, :n]
-        Y = shifted.T if shifted.shape[0] > 1 else shifted[0]
+        if self.cfg.normalize or self.cfg.gain_db != 0:
+            y, self.applied_gain_db = apply_volume(
+                y, sr, self.cfg.gain_db, self.cfg.normalize
+            )
+        Y = y.T if y.shape[0] > 1 else y[0]
 
         self.progressed.emit(70)
 
@@ -483,6 +642,33 @@ QDoubleSpinBox::down-arrow {{
     height: 10px;
 }}
 
+/* --- checkbox ---------------------------------------------------------- */
+QCheckBox {{
+    background: transparent;
+    spacing: 8px;
+    color: {C_TEXT};
+}}
+QCheckBox:disabled {{
+    color: {C_DISABLED};
+}}
+QCheckBox::indicator {{
+    width: 16px;
+    height: 16px;
+    border: 1px solid {C_BORDER};
+    border-radius: 5px;
+    background-color: {C_CARD};
+}}
+QCheckBox::indicator:hover {{
+    border-color: {C_ACCENT};
+}}
+QCheckBox::indicator:checked {{
+    border: 1px solid {C_ACCENT};
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 {C_ACCENT}, stop:1 {C_ACCENT_2}
+    );
+}}
+
 /* --- slider ------------------------------------------------------------ */
 QSlider::groove:horizontal {{
     height: 6px;
@@ -515,6 +701,12 @@ QSlider::sub-page:horizontal {{
         stop:0 {C_ACCENT}, stop:1 {C_ACCENT_2}
     );
     border-radius: 3px;
+}}
+QSlider::sub-page:horizontal:disabled {{
+    background: {C_BORDER};
+}}
+QSlider::handle:horizontal:disabled {{
+    background: {C_DISABLED};
 }}
 
 /* --- progress ----------------------------------------------------------- */
@@ -682,8 +874,8 @@ class PitchShifterApp(QWidget):
         super().__init__()
         self.setAcceptDrops(True)
         self.setWindowTitle("PitchShifter")
-        self.setMinimumSize(720, 560)
-        self.resize(880, 620)
+        self.setMinimumSize(720, 600)
+        self.resize(880, 670)
 
         self.in_path: Optional[str] = None
         self.worker: Optional[ProcessorThread] = None
@@ -809,6 +1001,47 @@ class PitchShifterApp(QWidget):
         grid.addWidget(sr_caption, 2, 0)
         grid.addLayout(sr_box, 2, 1)
 
+        # Row 3: volume
+        vol_caption = QLabel("Volume")
+        vol_caption.setObjectName("sectionLabel")
+
+        self.gain_slider = QSlider(Qt.Orientation.Horizontal)
+        self.gain_slider.setRange(MIN_GAIN_DB, MAX_GAIN_DB)
+        self.gain_slider.setSingleStep(1)
+        self.gain_slider.setValue(0)
+        self.gain_slider.setFixedHeight(24)
+
+        self.gain_spin = QDoubleSpinBox()
+        self.gain_spin.setRange(float(MIN_GAIN_DB), float(MAX_GAIN_DB))
+        self.gain_spin.setDecimals(1)
+        self.gain_spin.setSingleStep(0.5)
+        self.gain_spin.setFixedWidth(96)
+
+        gain_unit = QLabel("dB")
+        gain_unit.setObjectName("unitSuffix")
+
+        self.gain_slider.valueChanged.connect(self._gain_slider_moved)
+        self.gain_spin.valueChanged.connect(self._gain_spin_changed)
+
+        self.normalize_check = QCheckBox("Auto-normalize")
+        self.normalize_check.setToolTip(
+            f"Bring the file to a standard loudness ({TARGET_LOUDNESS_LUFS:g} LUFS).\n"
+            "Quiet tracks get louder, loud ones get softer.\n"
+            "Peaks are limited, so the result never clips."
+        )
+        self.normalize_check.toggled.connect(self._normalize_toggled)
+
+        gain_box = QHBoxLayout()
+        gain_box.setSpacing(12)
+        gain_box.addWidget(self.gain_slider, 1)
+        gain_box.addWidget(self.gain_spin)
+        gain_box.addWidget(gain_unit)
+        gain_box.addSpacing(6)
+        gain_box.addWidget(self.normalize_check)
+
+        grid.addWidget(vol_caption, 3, 0)
+        grid.addLayout(gain_box, 3, 1)
+
         card_layout.addLayout(grid)
 
         divider = QFrame()
@@ -831,7 +1064,7 @@ class PitchShifterApp(QWidget):
         btn_row.setSpacing(10)
 
         self.btn_reset = QPushButton("Reset")
-        self.btn_reset.clicked.connect(self.reset_shift)
+        self.btn_reset.clicked.connect(self.reset_controls)
 
         self.btn_export = QPushButton("Export…")
         self.btn_export.setObjectName("primaryButton")
@@ -898,8 +1131,25 @@ class PitchShifterApp(QWidget):
         self.shift_spin.blockSignals(False)
         self.shift_slider.blockSignals(False)
 
-    def reset_shift(self) -> None:
+    def _gain_slider_moved(self, v: int) -> None:
+        self.gain_spin.blockSignals(True)
+        self.gain_spin.setValue(float(v))
+        self.gain_spin.blockSignals(False)
+
+    def _gain_spin_changed(self, v: float) -> None:
+        self.gain_slider.blockSignals(True)
+        self.gain_slider.setValue(int(round(v)))
+        self.gain_slider.blockSignals(False)
+
+    def _normalize_toggled(self, on: bool) -> None:
+        # Auto-normalize picks the gain itself, so the manual control doesn't apply
+        self.gain_slider.setEnabled(not on)
+        self.gain_spin.setEnabled(not on)
+
+    def reset_controls(self) -> None:
         self.shift_spin.setValue(0.0)
+        self.gain_spin.setValue(0.0)
+        self.normalize_check.setChecked(False)
 
     # --- drag & drop ---
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:  # type: ignore[override]
@@ -982,16 +1232,28 @@ class PitchShifterApp(QWidget):
             out_path=out_path,
             semitone_shift=semis,
             sr=sr,
+            gain_db=float(self.gain_spin.value()),
+            normalize=self.normalize_check.isChecked(),
         )
         self.run_job(cfg)
 
     def suggest_out_name(self, default_suffix: str) -> str:
         assert self.in_path
         stem, _ = os.path.splitext(self.in_path)
-        sign = "+" if self.shift_spin.value() >= 0 else "-"
-        amt = abs(self.shift_spin.value())
-        unit = "semi" if self.unit_combo.currentIndex() == 0 else "tone"
-        return f"{stem}_pitch{sign}{amt:g}{unit}{default_suffix}"
+        shift = self.shift_spin.value()
+        gain = self.gain_spin.value()
+        normalize = self.normalize_check.isChecked()
+
+        name = stem
+        if shift != 0 or (gain == 0 and not normalize):
+            sign = "+" if shift >= 0 else "-"
+            unit = "semi" if self.unit_combo.currentIndex() == 0 else "tone"
+            name += f"_pitch{sign}{abs(shift):g}{unit}"
+        if normalize:
+            name += "_normalized"
+        elif gain != 0:
+            name += f"_vol{gain:+g}dB"
+        return name + default_suffix
 
     def run_job(self, cfg: JobConfig) -> None:
         if self.worker and self.worker.isRunning():
@@ -1031,8 +1293,10 @@ class PitchShifterApp(QWidget):
         self.progress.setValue(100)
         self._set_busy(False)
         base = os.path.basename(out_path)
-        self.status_label.setText(f"Done. Exported to: {base}")
-        QMessageBox.information(self, "Done", f"Exported to:\n{out_path}")
+        gain = self.worker.applied_gain_db if self.worker else None
+        vol_note = f" Volume {gain:+.1f} dB." if gain is not None else ""
+        self.status_label.setText(f"Done. Exported to: {base}.{vol_note}")
+        QMessageBox.information(self, "Done", f"Exported to:\n{out_path}\n{vol_note.strip()}")
 
     @Slot(str)
     def on_fail(self, msg: str) -> None:

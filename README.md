@@ -4,6 +4,7 @@ PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting o
 
 - Load **MP3 / WAV / OGG / FLAC / M4A / AAC / MP4 / MOV / MKV**
 - Shift pitch by **±24 semitones** (or **±12 tones**)
+- Make quiet tracks louder: volume in **dB** or **auto-normalize**, without clipping
 - Export as **WAV / MP3** (for audio) or **MP4** (for video, with remuxed video stream)
 - Simple, drag-and-drop friendly UI built with **PySide6**
 
@@ -22,6 +23,11 @@ PitchShifter is a small desktop app (Windows & Linux) for quick pitch shifting o
   - Output: `.mp4` — video stream is copied; only the audio is pitch-shifted and remuxed
 - 🎚 **Resampling**
   - Keep the original sample rate or convert to `44100`, `48000`, or `96000` Hz
+- 🔊 **Volume**
+  - Raise or lower the volume from **−12 to +24 dB**
+  - **Auto-normalize** brings any file to a standard loudness (−14 LUFS)
+  - A true-peak limiter keeps peaks under −1 dB, so boosting never clips or distorts
+  - Works on audio and video, together with a pitch shift or on its own
 - 🖱 **User interface**
   - Dark, modern UI with drag & drop support
   - Progress bar + status messages during processing
